@@ -1,0 +1,233 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS
+          - target: x86_64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+          # Linux
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-slim
+            archive: tar.gz
+          - target: aarch64-unknown-linux-gnu
+            os: ubuntu-slim
+            archive: tar.gz
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross-compilation tools
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gcc-aarch64-linux-gnu
+
+      - name: Build
+        run: |
+          if [ "${{ matrix.target }}" = "aarch64-unknown-linux-gnu" ]; then
+            export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc
+          fi
+          cargo build --release --target ${{ matrix.target }}
+
+      - name: Package
+        shell: bash
+        run: |
+          cd target/${{ matrix.target }}/release
+
+          if [ "${{ matrix.os }}" = "windows-latest" ]; then
+            7z a ../../../pg2sqlite-${{ matrix.target }}.zip pg2sqlite.exe
+          else
+            tar czvf ../../../pg2sqlite-${{ matrix.target }}.tar.gz pg2sqlite
+          fi
+
+          cd ../../..
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: pg2sqlite-${{ matrix.target }}
+          path: pg2sqlite-${{ matrix.target }}.${{ matrix.archive }}
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-slim
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v6
+        with:
+          path: artifacts
+
+      - name: Create checksums
+        run: |
+          cd artifacts
+          for dir in */; do
+            cd "$dir"
+            for file in *; do
+              sha256sum "$file" >> ../checksums.txt
+            done
+            cd ..
+          done
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/**/*.tar.gz
+            artifacts/**/*.zip
+            artifacts/checksums.txt
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: release
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Checkout homebrew-tap
+        uses: actions/checkout@v6
+        with:
+          repository: hiromaily/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: homebrew-tap
+
+      - name: Download release assets and calculate checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ github.ref_name }}
+        run: |
+          # Remove 'v' prefix for version number
+          VERSION_NUM="${VERSION#v}"
+
+          # Download all release assets
+          mkdir -p assets
+          cd assets
+
+          for target in x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-linux-gnu aarch64-unknown-linux-gnu; do
+            echo "Downloading pg2sqlite-${target}.tar.gz..."
+            gh release download "${VERSION}" \
+              --repo hiromaily/pg2sqlite-rs \
+              --pattern "pg2sqlite-${target}.tar.gz" || echo "Failed to download ${target}"
+          done
+
+          # Calculate SHA256 checksums
+          echo "Calculating checksums..."
+          SHA256_X86_64_DARWIN=$(sha256sum pg2sqlite-x86_64-apple-darwin.tar.gz | cut -d' ' -f1)
+          SHA256_AARCH64_DARWIN=$(sha256sum pg2sqlite-aarch64-apple-darwin.tar.gz | cut -d' ' -f1)
+          SHA256_X86_64_LINUX=$(sha256sum pg2sqlite-x86_64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)
+          SHA256_AARCH64_LINUX=$(sha256sum pg2sqlite-aarch64-unknown-linux-gnu.tar.gz | cut -d' ' -f1)
+
+          echo "SHA256_X86_64_DARWIN=${SHA256_X86_64_DARWIN}" >> $GITHUB_ENV
+          echo "SHA256_AARCH64_DARWIN=${SHA256_AARCH64_DARWIN}" >> $GITHUB_ENV
+          echo "SHA256_X86_64_LINUX=${SHA256_X86_64_LINUX}" >> $GITHUB_ENV
+          echo "SHA256_AARCH64_LINUX=${SHA256_AARCH64_LINUX}" >> $GITHUB_ENV
+          echo "VERSION_NUM=${VERSION_NUM}" >> $GITHUB_ENV
+
+      - name: Update formula
+        run: |
+          cd homebrew-tap
+
+          cat > Formula/pg2sqlite.rb << 'FORMULA_EOF'
+          # typed: false
+          # frozen_string_literal: true
+
+          # Homebrew formula for pg2sqlite
+          # Repository: https://github.com/hiromaily/homebrew-tap
+          class YamlLint < Formula
+            desc "A fast YAML linter written in Rust"
+            homepage "https://github.com/hiromaily/pg2sqlite-rs"
+            version "VERSION_PLACEHOLDER"
+            license "MIT"
+
+            on_macos do
+              on_intel do
+                url "https://github.com/hiromaily/pg2sqlite-rs/releases/download/v#{version}/pg2sqlite-x86_64-apple-darwin.tar.gz"
+                sha256 "SHA256_X86_64_DARWIN_PLACEHOLDER"
+              end
+
+              on_arm do
+                url "https://github.com/hiromaily/pg2sqlite-rs/releases/download/v#{version}/pg2sqlite-aarch64-apple-darwin.tar.gz"
+                sha256 "SHA256_AARCH64_DARWIN_PLACEHOLDER"
+              end
+            end
+
+            on_linux do
+              on_intel do
+                url "https://github.com/hiromaily/pg2sqlite-rs/releases/download/v#{version}/pg2sqlite-x86_64-unknown-linux-gnu.tar.gz"
+                sha256 "SHA256_X86_64_LINUX_PLACEHOLDER"
+              end
+
+              on_arm do
+                url "https://github.com/hiromaily/pg2sqlite-rs/releases/download/v#{version}/pg2sqlite-aarch64-unknown-linux-gnu.tar.gz"
+                sha256 "SHA256_AARCH64_LINUX_PLACEHOLDER"
+              end
+            end
+
+            def install
+              bin.install "pg2sqlite"
+            end
+
+            test do
+              # Create a test YAML file
+              (testpath/"test.yaml").write <<~EOS
+                key: value
+                list:
+                  - item1
+                  - item2
+              EOS
+
+              # Run pg2sqlite and check it exits successfully
+              system "#{bin}/pg2sqlite", testpath/"test.yaml"
+            end
+          end
+          FORMULA_EOF
+
+          # Replace placeholders with actual values
+          sed -i "s/VERSION_PLACEHOLDER/${VERSION_NUM}/g" Formula/pg2sqlite.rb
+          sed -i "s/SHA256_X86_64_DARWIN_PLACEHOLDER/${SHA256_X86_64_DARWIN}/g" Formula/pg2sqlite.rb
+          sed -i "s/SHA256_AARCH64_DARWIN_PLACEHOLDER/${SHA256_AARCH64_DARWIN}/g" Formula/pg2sqlite.rb
+          sed -i "s/SHA256_X86_64_LINUX_PLACEHOLDER/${SHA256_X86_64_LINUX}/g" Formula/pg2sqlite.rb
+          sed -i "s/SHA256_AARCH64_LINUX_PLACEHOLDER/${SHA256_AARCH64_LINUX}/g" Formula/pg2sqlite.rb
+
+          echo "Updated formula:"
+          cat Formula/pg2sqlite.rb
+
+      - name: Commit and push
+        run: |
+          cd homebrew-tap
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/pg2sqlite.rb
+          git commit -m "Update pg2sqlite to ${VERSION_NUM}"
+          git push
