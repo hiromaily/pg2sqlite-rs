@@ -1,20 +1,15 @@
 [package]
-name = "pg2sqlite-core"
+name = "pg2sqlc-core"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "Core YAML linting engine - fast, configurable YAML linter inspired by yamllint"
+description = "Core library for converting PostgreSQL 16 DDL to SQLite3 DDL"
 readme = "../README.md"
-keywords = ["yaml", "linter", "lint", "validation", "config"]
-categories = ["development-tools", "command-line-utilities", "config"]
+keywords = ["postgresql", "sqlite", "ddl", "converter", "schema"]
+categories = ["development-tools", "command-line-utilities", "database"]
 
 [dependencies]
-yaml-rust2 = { workspace = true }
-serde = { workspace = true }
-serde_yaml = { workspace = true }
+sqlparser = { version = "0.53", features = ["visitor"] }
 thiserror = { workspace = true }
-regex = "1.11"
-indexmap = { version = "2.6", features = ["serde"] }
-colored = "2.1"

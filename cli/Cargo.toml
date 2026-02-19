@@ -1,27 +1,21 @@
 [package]
-name = "pg2sqlite"
+name = "pg2sqlc"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "A fast YAML linter written in Rust - 20-60x faster than Python yamllint"
+description = "PostgreSQL 16 DDL to SQLite3 DDL schema converter"
 readme = "../README.md"
-keywords = ["yaml", "linter", "lint", "cli", "devtools"]
-categories = ["development-tools", "command-line-utilities"]
+keywords = ["postgresql", "sqlite", "ddl", "converter", "cli"]
+categories = ["development-tools", "command-line-utilities", "database"]
 
 [[bin]]
-name = "pg2sqlite"
+name = "pg2sqlc"
 path = "src/main.rs"
 
 [dependencies]
-pg2sqlite-core = { version = "0.2.0", path = "../core" }
+pg2sqlc-core = { path = "../core" }
 clap = { version = "4.5", features = ["derive", "cargo"] }
 colored = "2.1"
 anyhow = "1.0"
-walkdir = "2.5"
-ignore = "0.4"
-is-terminal = "0.4.17"
-
-[dev-dependencies]
-cargo-husky.workspace = true
