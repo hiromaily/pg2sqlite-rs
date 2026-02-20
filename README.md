@@ -30,8 +30,7 @@ Built with [Claude Code](https://www.anthropic.com/claude-code).
 ### Homebrew (macOS/Linux)
 
 ```bash
-brew tap hiromaily/tap
-brew install pg2sqlite
+brew install hiromaily/tap/pg2sqlite
 ```
 
 ### From Source
