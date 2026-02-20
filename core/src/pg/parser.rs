@@ -2,9 +2,9 @@
 ///
 /// Converts sqlparser AST into our internal representation (IR).
 use sqlparser::ast::{
-    self, AlterTableOperation, ArrayElemTypeDef, ColumnDef, ColumnOption, CreateIndex, DataType,
-    Expr as SqlExpr, ObjectName, ReferentialAction, Statement, TableConstraint as SqlConstraint,
-    UserDefinedTypeRepresentation,
+    self, AlterTableOperation, Array, ArrayElemTypeDef, BinaryOperator, ColumnDef, ColumnOption,
+    CreateIndex, DataType, Expr as SqlExpr, ObjectName, ReferentialAction, Statement,
+    TableConstraint as SqlConstraint, UserDefinedTypeRepresentation,
 };
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
@@ -444,8 +444,46 @@ fn convert_sql_expr(expr: &SqlExpr) -> Expr {
             negated: *negated,
         },
         SqlExpr::Nested(inner) => Expr::Nested(Box::new(convert_sql_expr(inner))),
+        // col = ANY(ARRAY['a', 'b']) → col IN ('a', 'b')
+        SqlExpr::AnyOp {
+            left,
+            compare_op: BinaryOperator::Eq,
+            right,
+            ..
+        } => {
+            let left_expr = convert_sql_expr(left);
+            let list = extract_array_elements(right);
+            Expr::InList {
+                expr: Box::new(left_expr),
+                list,
+                negated: false,
+            }
+        }
+        // col != ANY(ARRAY['a', 'b']) → col NOT IN ('a', 'b')
+        SqlExpr::AnyOp {
+            left,
+            compare_op: BinaryOperator::NotEq,
+            right,
+            ..
+        } => {
+            let left_expr = convert_sql_expr(left);
+            let list = extract_array_elements(right);
+            Expr::InList {
+                expr: Box::new(left_expr),
+                list,
+                negated: true,
+            }
+        }
         // Fallback: render back to SQL string
         _ => Expr::Raw(expr.to_string()),
+    }
+}
+
+/// Extract elements from an ARRAY expression, falling back to a single Raw element.
+fn extract_array_elements(expr: &SqlExpr) -> Vec<Expr> {
+    match expr {
+        SqlExpr::Array(Array { elem, .. }) => elem.iter().map(convert_sql_expr).collect(),
+        other => vec![convert_sql_expr(other)],
     }
 }
 
@@ -589,5 +627,42 @@ mod tests {
         let sql = "CREATE TABLE t (age INTEGER CHECK (age >= 0));";
         let (model, _) = parse(sql);
         assert!(model.tables[0].columns[0].check.is_some());
+    }
+
+    #[test]
+    fn test_parse_any_array_to_in_list() {
+        let sql = r#"CREATE TABLE t (
+            status TEXT NOT NULL,
+            CONSTRAINT status_check CHECK ((status = ANY (ARRAY['active'::text, 'inactive'::text])))
+        );"#;
+        let (model, _) = parse(sql);
+        let table = &model.tables[0];
+        assert_eq!(table.constraints.len(), 1);
+        if let TableConstraint::Check { name, expr } = &table.constraints[0] {
+            assert_eq!(name.as_ref().unwrap().normalized, "status_check");
+            // Should be Nested(InList { ... })
+            if let Expr::Nested(inner) = expr {
+                if let Expr::InList {
+                    expr: col,
+                    list,
+                    negated,
+                } = inner.as_ref()
+                {
+                    assert!(!negated);
+                    assert!(matches!(col.as_ref(), Expr::ColumnRef(name) if name == "status"));
+                    assert_eq!(list.len(), 2);
+                    // Casts should be preserved at parse level (stripped during transform)
+                    assert!(
+                        matches!(&list[0], Expr::Cast { expr, .. } if matches!(expr.as_ref(), Expr::StringLiteral(s) if s == "active"))
+                    );
+                } else {
+                    panic!("Expected InList, got: {inner:?}");
+                }
+            } else {
+                panic!("Expected Nested, got: {expr:?}");
+            }
+        } else {
+            panic!("Expected Check constraint");
+        }
     }
 }
