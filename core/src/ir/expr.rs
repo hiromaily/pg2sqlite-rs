@@ -76,7 +76,16 @@ impl Expr {
                 }
             }
             Expr::Null => "NULL".to_string(),
-            Expr::ColumnRef(name) => name.clone(),
+            Expr::ColumnRef(name) => {
+                // Quote each dot-separated identifier part to prevent injection
+                name.split('.')
+                    .map(|part| {
+                        let ident = super::Ident::new(part);
+                        ident.to_sql()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(".")
+            }
             Expr::FunctionCall { name, args } => {
                 let args_str: Vec<String> = args.iter().map(|a| a.to_sql()).collect();
                 format!("{name}({})", args_str.join(", "))
