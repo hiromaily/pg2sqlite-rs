@@ -2,9 +2,9 @@
 ///
 /// Converts sqlparser AST into our internal representation (IR).
 use sqlparser::ast::{
-    self, AlterTableOperation, ArrayElemTypeDef, ColumnDef, ColumnOption, CreateIndex, DataType,
-    Expr as SqlExpr, ObjectName, ReferentialAction, Statement, TableConstraint as SqlConstraint,
-    UserDefinedTypeRepresentation,
+    self, AlterTableOperation, Array, ArrayElemTypeDef, BinaryOperator, ColumnDef, ColumnOption,
+    CreateIndex, DataType, Expr as SqlExpr, ObjectName, ReferentialAction, Statement,
+    TableConstraint as SqlConstraint, UserDefinedTypeRepresentation,
 };
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
@@ -444,8 +444,44 @@ fn convert_sql_expr(expr: &SqlExpr) -> Expr {
             negated: *negated,
         },
         SqlExpr::Nested(inner) => Expr::Nested(Box::new(convert_sql_expr(inner))),
+        // col = ANY(ARRAY['a', 'b']) → col IN ('a', 'b')
+        // Only convert when the right-hand side is an ARRAY literal.
+        // Non-array forms (e.g., subqueries) fall through to Raw to avoid
+        // producing a semantically incorrect single-element InList.
+        SqlExpr::AnyOp {
+            left,
+            compare_op: BinaryOperator::Eq,
+            right,
+            ..
+        } => match extract_array_elements(right) {
+            Some(list) => {
+                let left_expr = convert_sql_expr(left);
+                Expr::InList {
+                    expr: Box::new(left_expr),
+                    list,
+                    negated: false,
+                }
+            }
+            None => Expr::Raw(expr.to_string()),
+        },
+        // Note: `expr != ANY(ARRAY[...])` is NOT equivalent to `NOT IN (...)`.
+        // `!= ANY` is true if expr differs from *at least one* element,
+        // whereas `NOT IN` requires expr to differ from *all* elements.
+        // The correct equivalent of `NOT IN` is `!= ALL(...)`, not `!= ANY(...)`.
+        // We let `!= ANY` fall through to the Raw fallback below.
+        //
         // Fallback: render back to SQL string
         _ => Expr::Raw(expr.to_string()),
+    }
+}
+
+/// Extract elements from an ARRAY literal expression.
+/// Returns `None` for non-array expressions (e.g., subqueries) so callers
+/// can fall back to `Expr::Raw` instead of producing incorrect results.
+fn extract_array_elements(expr: &SqlExpr) -> Option<Vec<Expr>> {
+    match expr {
+        SqlExpr::Array(Array { elem, .. }) => Some(elem.iter().map(convert_sql_expr).collect()),
+        _ => None,
     }
 }
 
@@ -589,5 +625,42 @@ mod tests {
         let sql = "CREATE TABLE t (age INTEGER CHECK (age >= 0));";
         let (model, _) = parse(sql);
         assert!(model.tables[0].columns[0].check.is_some());
+    }
+
+    #[test]
+    fn test_parse_any_array_to_in_list() {
+        let sql = r#"CREATE TABLE t (
+            status TEXT NOT NULL,
+            CONSTRAINT status_check CHECK ((status = ANY (ARRAY['active'::text, 'inactive'::text])))
+        );"#;
+        let (model, _) = parse(sql);
+        let table = &model.tables[0];
+        assert_eq!(table.constraints.len(), 1);
+        if let TableConstraint::Check { name, expr } = &table.constraints[0] {
+            assert_eq!(name.as_ref().unwrap().normalized, "status_check");
+            // Should be Nested(InList { ... })
+            if let Expr::Nested(inner) = expr {
+                if let Expr::InList {
+                    expr: col,
+                    list,
+                    negated,
+                } = inner.as_ref()
+                {
+                    assert!(!negated);
+                    assert!(matches!(col.as_ref(), Expr::ColumnRef(name) if name == "status"));
+                    assert_eq!(list.len(), 2);
+                    // Casts should be preserved at parse level (stripped during transform)
+                    assert!(
+                        matches!(&list[0], Expr::Cast { expr, .. } if matches!(expr.as_ref(), Expr::StringLiteral(s) if s == "active"))
+                    );
+                } else {
+                    panic!("Expected InList, got: {inner:?}");
+                }
+            } else {
+                panic!("Expected Nested, got: {expr:?}");
+            }
+        } else {
+            panic!("Expected Check constraint");
+        }
     }
 }

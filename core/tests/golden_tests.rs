@@ -87,3 +87,12 @@ fn test_golden_various_types() {
         &ConvertOptions::default(),
     );
 }
+
+#[test]
+fn test_golden_check_constraint() {
+    run_golden_test(
+        "tests/fixtures/check_constraint.sql",
+        "tests/golden/check_constraint.out.sql",
+        &ConvertOptions::default(),
+    );
+}
