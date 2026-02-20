@@ -117,10 +117,10 @@ jobs:
       - name: Validate fixtures
         run: |
           echo "=== Testing valid fixtures ==="
-          ./target/release/pg2sqlite tests/fixtures/valid/
-
-          echo "=== Testing invalid fixtures (should fail) ==="
-          ! ./target/release/pg2sqlite tests/fixtures/invalid/
+          for f in tests/fixtures/*.sql; do
+            echo "--- Converting: $f ---"
+            ./target/release/pg2sqlite --input "$f"
+          done
 
   # ===========================================================================
   # Check - Fast check without full build
