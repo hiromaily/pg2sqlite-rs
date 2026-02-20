@@ -398,10 +398,10 @@ fn find_in_line(line: &str) -> Option<usize> {
 
 ### MSRV Compatibility
 
-For Rust 1.85 compatibility, avoid `if let ... && let ...` chains:
+For Rust 1.93 compatibility, avoid `if let ... && let ...` chains:
 
 ```rust
-// Instead of (unstable in 1.85):
+// Instead of (unstable in 1.93):
 if let Some(x) = opt && x > 0 { ... }
 
 // Use nested ifs with allow attribute:
