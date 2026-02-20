@@ -6,8 +6,8 @@
 - **No database connections** — offline text-to-text conversion
 
 ## Architecture
-- `core/` = library crate (`pg2sqlc-core`, reusable)
-- `cli/` = binary crate (`pg2sqlc`, thin wrapper)
+- `core/` = library crate (`pg2sqlite-core`, reusable)
+- `cli/` = binary crate (`pg2sqlite`, thin wrapper)
 - Pipeline: Parse → Normalize → Plan → Transform → Order → Render → Report
 
 ### Module Layout

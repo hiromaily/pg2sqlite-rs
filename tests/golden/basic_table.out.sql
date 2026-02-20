@@ -1,0 +1,7 @@
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT UNIQUE,
+  active INTEGER DEFAULT 1,
+  created_at TEXT DEFAULT (CURRENT_TIMESTAMP)
+);

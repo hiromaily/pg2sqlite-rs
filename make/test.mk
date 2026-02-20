@@ -23,159 +23,29 @@ test-one:
 # Fixture Validation
 # ==============================================================================
 
-# Validate all fixtures - valid files should pass, invalid should fail
+# Validate fixtures by running conversion on test SQL files
 .PHONY: validate-fixtures
 validate-fixtures: release
 	@echo "=== Validating test fixtures ==="
 	@echo ""
-	@echo "--- Valid fixtures (should have 0 errors) ---"
-	@./target/release/pg2sqlite tests/fixtures/valid/ && echo "✓ All valid fixtures passed" || (echo "✗ Valid fixtures had unexpected errors" && exit 1)
+	@for f in tests/fixtures/*.sql; do \
+		printf "  %-50s " "$$f:"; \
+		if ./target/release/pg2sqlite --input "$$f" > /dev/null 2>&1; then \
+			echo "✓ PASS"; \
+		else \
+			echo "✗ FAIL"; \
+		fi; \
+	done
 	@echo ""
-	@echo "--- Invalid fixtures (should have errors) ---"
-	@./target/release/pg2sqlite tests/fixtures/invalid/ 2>&1; \
-	if [ $$? -eq 0 ]; then \
-		echo "✗ Invalid fixtures should have errors but passed"; \
-		exit 1; \
-	else \
-		echo "✓ Invalid fixtures correctly detected errors"; \
-	fi
-	@echo ""
-	@echo "=== All fixture validations passed ==="
+	@echo "=== Fixture validation complete ==="
 
-# Show detailed results for each invalid fixture
+# Validate fixtures with detailed output
 .PHONY: validate-fixtures-detail
 validate-fixtures-detail: release
 	@echo "=== Detailed fixture validation ==="
 	@echo ""
-	@echo "--- Valid fixtures ---"
-	@for f in tests/fixtures/valid/*.yaml; do \
-		printf "  %-40s " "$$f:"; \
-		if ./target/release/pg2sqlite "$$f" > /dev/null 2>&1; then \
-			echo "✓ PASS"; \
-		else \
-			echo "✗ FAIL (unexpected)"; \
-		fi; \
+	@for f in tests/fixtures/*.sql; do \
+		echo "--- $$f ---"; \
+		./target/release/pg2sqlite --input "$$f" 2>&1 || true; \
+		echo ""; \
 	done
-	@echo ""
-	@echo "--- Invalid fixtures ---"
-	@for f in tests/fixtures/invalid/*.yaml; do \
-		printf "  %-45s " "$$f:"; \
-		output=$$(./target/release/pg2sqlite "$$f" 2>&1); \
-		if [ $$? -ne 0 ]; then \
-			count=$$(echo "$$output" | grep -c "error\|warning" || echo "0"); \
-			echo "✓ DETECTED ($$count issues)"; \
-		else \
-			echo "✗ MISSED (no errors detected)"; \
-		fi; \
-	done
-	@echo ""
-
-# ==============================================================================
-# Individual Rule Validation
-# ==============================================================================
-
-.PHONY: validate-rule-trailing-spaces
-validate-rule-trailing-spaces: release
-	@echo "Testing trailing-spaces rule:"
-	@./target/release/pg2sqlite tests/fixtures/invalid/trailing-spaces.yaml || true
-
-.PHONY: validate-rule-line-length
-validate-rule-line-length: release
-	@echo "Testing line-length rule:"
-	@./target/release/pg2sqlite tests/fixtures/invalid/long-lines.yaml || true
-
-.PHONY: validate-rule-colons
-validate-rule-colons: release
-	@echo "Testing colons rule:"
-	@./target/release/pg2sqlite tests/fixtures/invalid/bad-colons.yaml || true
-
-.PHONY: validate-rule-duplicates
-validate-rule-duplicates: release
-	@echo "Testing key-duplicates rule:"
-	@./target/release/pg2sqlite tests/fixtures/invalid/duplicate-keys.yaml || true
-
-.PHONY: validate-rule-indentation
-validate-rule-indentation: release
-	@echo "Testing indentation rule:"
-	@./target/release/pg2sqlite tests/fixtures/invalid/bad-indentation.yaml || true
-	@echo ""
-	@echo "Testing tabs-indentation:"
-	@./target/release/pg2sqlite tests/fixtures/invalid/tabs-indentation.yaml || true
-
-# Run all rule validations
-.PHONY: validate-all-rules
-validate-all-rules: validate-rule-trailing-spaces validate-rule-line-length validate-rule-colons validate-rule-duplicates validate-rule-indentation
-	@echo ""
-	@echo "=== All rule validations complete ==="
-
-# ==============================================================================
-# Fix Option Tests
-# ==============================================================================
-
-# Test --fix option (dry-run mode)
-.PHONY: test-fix-dry-run
-test-fix-dry-run: release
-	@echo "=== Testing --fix --dry-run option ==="
-	@echo ""
-	@echo "--- Dry-run on trailing-spaces fixture ---"
-	@./target/release/pg2sqlite --dry-run tests/fixtures/invalid/trailing-spaces.yaml
-	@echo ""
-	@echo "--- Dry-run on all invalid fixtures ---"
-	@./target/release/pg2sqlite --dry-run tests/fixtures/invalid/ || true
-	@echo ""
-	@echo "=== Dry-run tests complete ==="
-
-# Test --fix option with actual file modification (uses temp files)
-.PHONY: test-fix
-test-fix: release
-	@echo "=== Testing --fix option ==="
-	@echo ""
-	@# Create temp directory
-	@mkdir -p /tmp/pg2sqlite-test
-	@# Copy fixtures to temp
-	@cp tests/fixtures/invalid/trailing-spaces.yaml /tmp/pg2sqlite-test/
-	@echo "--- Before fix ---"
-	@./target/release/pg2sqlite /tmp/pg2sqlite-test/trailing-spaces.yaml || true
-	@echo ""
-	@echo "--- Applying fix ---"
-	@./target/release/pg2sqlite --fix /tmp/pg2sqlite-test/trailing-spaces.yaml
-	@echo ""
-	@echo "--- After fix ---"
-	@./target/release/pg2sqlite /tmp/pg2sqlite-test/trailing-spaces.yaml && echo "✓ File is now clean" || echo "✗ File still has issues"
-	@echo ""
-	@# Cleanup
-	@rm -rf /tmp/pg2sqlite-test
-	@echo "=== Fix tests complete ==="
-
-# Test --fix with multiple files
-.PHONY: test-fix-multi
-test-fix-multi: release
-	@echo "=== Testing --fix with multiple files ==="
-	@echo ""
-	@mkdir -p /tmp/pg2sqlite-test
-	@cp tests/fixtures/invalid/trailing-spaces.yaml /tmp/pg2sqlite-test/file1.yaml
-	@cp tests/fixtures/invalid/trailing-spaces.yaml /tmp/pg2sqlite-test/file2.yaml
-	@echo "key: value" > /tmp/pg2sqlite-test/file3.yaml  # No newline at end
-	@echo ""
-	@echo "--- Fixing all files ---"
-	@./target/release/pg2sqlite --fix /tmp/pg2sqlite-test/
-	@echo ""
-	@echo "--- Verifying fixes ---"
-	@./target/release/pg2sqlite /tmp/pg2sqlite-test/ && echo "✓ All files are clean" || echo "✗ Some files still have issues"
-	@rm -rf /tmp/pg2sqlite-test
-	@echo ""
-	@echo "=== Multi-file fix tests complete ==="
-
-# Run fix-related unit tests
-.PHONY: test-fix-unit
-test-fix-unit:
-	@echo "=== Running fix unit tests ==="
-	cargo test fix --all -- --nocapture
-	@echo ""
-	@echo "=== Fix unit tests complete ==="
-
-# Run all fix tests
-.PHONY: test-fix-all
-test-fix-all: test-fix-unit test-fix-dry-run test-fix test-fix-multi
-	@echo ""
-	@echo "=== All fix tests complete ==="

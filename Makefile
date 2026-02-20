@@ -20,4 +20,5 @@ include make/dev.mk
 include make/test.mk
 include make/cli.mk
 include make/release.mk
+include make/rust.mk
 include make/help.mk

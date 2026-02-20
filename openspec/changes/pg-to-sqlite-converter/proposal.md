@@ -7,7 +7,7 @@ There is no lightweight, offline tool to convert PostgreSQL 16 DDL schemas into 
 This project starts from a **copied pg2sqlite-rs codebase** (`core/` + `cli/` workspace). Several patterns are directly reusable:
 
 - **Workspace structure**: `core/` (library) + `cli/` (thin binary) — keep as-is
-- **CLI patterns**: `clap` derive-based argument parsing, `ColorMode`, `configure_colors()`, exit code strategy (0/1/2), `anyhow::Context` error wrapping — adapt for pg2sqlc flags
+- **CLI patterns**: `clap` derive-based argument parsing, `ColorMode`, `configure_colors()`, exit code strategy (0/1/2), `anyhow::Context` error wrapping — adapt for pg2sqlite flags
 - **Error handling**: `thiserror`-based error enum with `#[from]` variants, `type Result<T>` alias — reuse pattern
 - **Diagnostics/problem model**: `LintProblem { line, column, message, rule, level }` with `Ord` sorting — becomes `Warning { code, severity, message, object, span }`
 - **Output formatters**: `OutputFormatter` trait with Standard/Colored/Parsable variants — reuse for diagnostic output
@@ -21,7 +21,7 @@ Detailed specifications already exist in `docs/`:
 
 ## What Changes
 
-- **New CLI tool** (`pg2sqlc`) that reads PostgreSQL DDL text and outputs SQLite3 DDL
+- **New CLI tool** (`pg2sqlite`) that reads PostgreSQL DDL text and outputs SQLite3 DDL
 - **PostgreSQL DDL parser** that extracts CREATE TABLE, ALTER TABLE ADD CONSTRAINT, CREATE INDEX, CREATE SEQUENCE, CREATE TYPE (enum), and CREATE DOMAIN statements into an internal representation
 - **Type mapping engine** covering all PostgreSQL types → SQLite type affinities (INTEGER, TEXT, REAL, NUMERIC, BLOB) with ~30 warning codes for lossy conversions
 - **Constraint transformation** that merges ALTER TABLE constraints into consolidated CREATE TABLE output, maps PK/UNIQUE/FK/CHECK constraints, and handles SERIAL/IDENTITY → INTEGER PRIMARY KEY
@@ -52,6 +52,6 @@ _(none — no existing specs)_
 - **Crate structure**: Workspace stays as `core/` (library) + `cli/` (binary); source files replaced but structural patterns preserved
 - **Dependencies added**: `sqlparser` (PostgreSQL dialect SQL parser) — the main new dependency; keep `clap`, `colored`, `anyhow`, `thiserror`
 - **Dependencies removed**: `yaml-rust2`, `serde_yaml`, `regex`, `indexmap`, `walkdir`, `ignore` — no longer needed
-- **Cargo.toml**: Workspace package metadata updated (name → pg2sqlc, repository, description); crate names updated
+- **Cargo.toml**: Workspace package metadata updated (name → pg2sqlite, repository, description); crate names updated
 - **Tests**: New test infrastructure with unit tests for type/expr mapping, golden tests (DDL snapshot comparison with `tests/fixtures/*.sql` → `tests/golden/*.out.sql`)
-- **Makefile**: `make/dev.mk` and `make/release.mk` reused as-is; `make/test.mk` and `make/cli.mk` adapted for pg2sqlc commands and SQL fixtures
+- **Makefile**: `make/dev.mk` and `make/release.mk` reused as-is; `make/test.mk` and `make/cli.mk` adapted for pg2sqlite commands and SQL fixtures

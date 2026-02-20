@@ -1,0 +1,340 @@
+/// SQLite DDL rendering from IR.
+use crate::ir::{Column, Index, IndexColumn, SchemaModel, Table, TableConstraint};
+
+/// Render the schema model as SQLite DDL text.
+pub fn render(model: &SchemaModel, enable_foreign_keys: bool) -> String {
+    let mut output = String::new();
+
+    // PRAGMA
+    if enable_foreign_keys {
+        output.push_str("PRAGMA foreign_keys = ON;\n\n");
+    }
+
+    // CREATE TABLE statements
+    for table in &model.tables {
+        render_table(table, &mut output);
+        output.push('\n');
+    }
+
+    // CREATE INDEX statements (sorted by table name, then index name)
+    let mut indexes: Vec<&Index> = model.indexes.iter().collect();
+    indexes.sort_by(|a, b| {
+        a.table
+            .name
+            .normalized
+            .cmp(&b.table.name.normalized)
+            .then_with(|| a.name.normalized.cmp(&b.name.normalized))
+    });
+
+    for index in indexes {
+        render_index(index, &mut output);
+        output.push('\n');
+    }
+
+    // Remove trailing newline
+    while output.ends_with("\n\n") {
+        output.pop();
+    }
+    if !output.ends_with('\n') {
+        output.push('\n');
+    }
+
+    output
+}
+
+fn render_table(table: &Table, out: &mut String) {
+    out.push_str(&format!("CREATE TABLE {} (\n", table.name.to_sql()));
+
+    let mut parts: Vec<String> = Vec::new();
+
+    // Columns
+    for col in &table.columns {
+        parts.push(render_column(col));
+    }
+
+    // Table-level constraints (PK → UNIQUE → CHECK → FK)
+    let mut sorted_constraints = table.constraints.clone();
+    sorted_constraints.sort_by_key(|c| match c {
+        TableConstraint::PrimaryKey { .. } => 0,
+        TableConstraint::Unique { .. } => 1,
+        TableConstraint::Check { .. } => 2,
+        TableConstraint::ForeignKey { .. } => 3,
+    });
+
+    for constraint in &sorted_constraints {
+        parts.push(render_table_constraint(constraint));
+    }
+
+    out.push_str(&parts.join(",\n"));
+    out.push_str("\n);\n");
+}
+
+fn render_column(col: &Column) -> String {
+    let mut parts = Vec::new();
+
+    parts.push(format!("  {}", col.name.to_sql()));
+
+    // Type
+    if let Some(sqlite_type) = &col.sqlite_type {
+        parts.push(sqlite_type.to_string());
+    }
+
+    // PRIMARY KEY
+    if col.is_primary_key {
+        parts.push("PRIMARY KEY".to_string());
+    }
+
+    // NOT NULL
+    if col.not_null && !col.is_primary_key {
+        parts.push("NOT NULL".to_string());
+    }
+
+    // UNIQUE
+    if col.is_unique {
+        parts.push("UNIQUE".to_string());
+    }
+
+    // DEFAULT
+    if let Some(default) = &col.default {
+        let sql = default.to_sql();
+        // Wrap function calls and complex expressions in parentheses
+        if needs_default_parens(&sql) {
+            parts.push(format!("DEFAULT ({sql})"));
+        } else {
+            parts.push(format!("DEFAULT {sql}"));
+        }
+    }
+
+    // CHECK
+    if let Some(check) = &col.check {
+        parts.push(format!("CHECK ({})", check.to_sql()));
+    }
+
+    // REFERENCES
+    if let Some(fk) = &col.references {
+        let mut fk_str = format!("REFERENCES {}", fk.table.to_sql());
+        if let Some(col_ref) = &fk.column {
+            fk_str.push_str(&format!("({})", col_ref.to_sql()));
+        }
+        if let Some(action) = &fk.on_delete {
+            fk_str.push_str(&format!(" ON DELETE {action}"));
+        }
+        if let Some(action) = &fk.on_update {
+            fk_str.push_str(&format!(" ON UPDATE {action}"));
+        }
+        parts.push(fk_str);
+    }
+
+    parts.join(" ")
+}
+
+fn render_table_constraint(constraint: &TableConstraint) -> String {
+    match constraint {
+        TableConstraint::PrimaryKey { columns, .. } => {
+            let cols: Vec<String> = columns.iter().map(|c| c.to_sql()).collect();
+            format!("  PRIMARY KEY ({})", cols.join(", "))
+        }
+        TableConstraint::Unique { columns, .. } => {
+            let cols: Vec<String> = columns.iter().map(|c| c.to_sql()).collect();
+            format!("  UNIQUE ({})", cols.join(", "))
+        }
+        TableConstraint::Check { expr, .. } => {
+            format!("  CHECK ({})", expr.to_sql())
+        }
+        TableConstraint::ForeignKey {
+            columns,
+            ref_table,
+            ref_columns,
+            on_delete,
+            on_update,
+            ..
+        } => {
+            let cols: Vec<String> = columns.iter().map(|c| c.to_sql()).collect();
+            let ref_cols: Vec<String> = ref_columns.iter().map(|c| c.to_sql()).collect();
+            let mut s = format!(
+                "  FOREIGN KEY ({}) REFERENCES {}({})",
+                cols.join(", "),
+                ref_table.to_sql(),
+                ref_cols.join(", ")
+            );
+            if let Some(action) = on_delete {
+                s.push_str(&format!(" ON DELETE {action}"));
+            }
+            if let Some(action) = on_update {
+                s.push_str(&format!(" ON UPDATE {action}"));
+            }
+            s
+        }
+    }
+}
+
+fn render_index(index: &Index, out: &mut String) {
+    if index.unique {
+        out.push_str("CREATE UNIQUE INDEX ");
+    } else {
+        out.push_str("CREATE INDEX ");
+    }
+
+    out.push_str(&index.name.to_sql());
+    out.push_str(" ON ");
+    out.push_str(&index.table.to_sql());
+    out.push_str(" (");
+
+    let cols: Vec<String> = index
+        .columns
+        .iter()
+        .map(|c| match c {
+            IndexColumn::Column(ident) => ident.to_sql(),
+            IndexColumn::Expression(expr) => expr.to_sql(),
+        })
+        .collect();
+
+    out.push_str(&cols.join(", "));
+    out.push(')');
+
+    if let Some(where_clause) = &index.where_clause {
+        out.push_str(&format!(" WHERE {}", where_clause.to_sql()));
+    }
+
+    out.push_str(";\n");
+}
+
+fn needs_default_parens(sql: &str) -> bool {
+    sql.contains('(') || sql == "CURRENT_TIMESTAMP"
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::ir::*;
+
+    fn make_column(name: &str, sqlite_type: SqliteType) -> Column {
+        Column {
+            name: Ident::new(name),
+            pg_type: PgType::Integer,
+            sqlite_type: Some(sqlite_type),
+            not_null: false,
+            default: None,
+            is_primary_key: false,
+            is_unique: false,
+            references: None,
+            check: None,
+        }
+    }
+
+    #[test]
+    fn test_render_simple_table() {
+        let model = SchemaModel {
+            tables: vec![Table {
+                name: QualifiedName::new(Ident::new("users")),
+                columns: vec![
+                    {
+                        let mut c = make_column("id", SqliteType::Integer);
+                        c.is_primary_key = true;
+                        c
+                    },
+                    {
+                        let mut c = make_column("name", SqliteType::Text);
+                        c.not_null = true;
+                        c
+                    },
+                ],
+                constraints: vec![],
+            }],
+            ..Default::default()
+        };
+
+        let sql = render(&model, false);
+        assert!(sql.contains("CREATE TABLE users"));
+        assert!(sql.contains("id INTEGER PRIMARY KEY"));
+        assert!(sql.contains("name TEXT NOT NULL"));
+    }
+
+    #[test]
+    fn test_render_with_pragma() {
+        let model = SchemaModel::default();
+        let sql = render(&model, true);
+        assert!(sql.starts_with("PRAGMA foreign_keys = ON;"));
+    }
+
+    #[test]
+    fn test_render_composite_pk() {
+        let model = SchemaModel {
+            tables: vec![Table {
+                name: QualifiedName::new(Ident::new("user_roles")),
+                columns: vec![
+                    make_column("user_id", SqliteType::Integer),
+                    make_column("role_id", SqliteType::Integer),
+                ],
+                constraints: vec![TableConstraint::PrimaryKey {
+                    name: None,
+                    columns: vec![Ident::new("user_id"), Ident::new("role_id")],
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let sql = render(&model, false);
+        assert!(sql.contains("PRIMARY KEY (user_id, role_id)"));
+    }
+
+    #[test]
+    fn test_render_fk_with_cascade() {
+        let model = SchemaModel {
+            tables: vec![Table {
+                name: QualifiedName::new(Ident::new("orders")),
+                columns: vec![make_column("user_id", SqliteType::Integer)],
+                constraints: vec![TableConstraint::ForeignKey {
+                    name: None,
+                    columns: vec![Ident::new("user_id")],
+                    ref_table: QualifiedName::new(Ident::new("users")),
+                    ref_columns: vec![Ident::new("id")],
+                    on_delete: Some(FkAction::Cascade),
+                    on_update: None,
+                    deferrable: false,
+                }],
+            }],
+            ..Default::default()
+        };
+
+        let sql = render(&model, true);
+        assert!(sql.contains("FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE"));
+    }
+
+    #[test]
+    fn test_render_index() {
+        let model = SchemaModel {
+            indexes: vec![Index {
+                name: Ident::new("idx_email"),
+                table: QualifiedName::new(Ident::new("users")),
+                columns: vec![IndexColumn::Column(Ident::new("email"))],
+                unique: true,
+                method: None,
+                where_clause: None,
+            }],
+            ..Default::default()
+        };
+
+        let sql = render(&model, false);
+        assert!(sql.contains("CREATE UNIQUE INDEX idx_email ON users (email);"));
+    }
+
+    #[test]
+    fn test_render_default_current_timestamp() {
+        let model = SchemaModel {
+            tables: vec![Table {
+                name: QualifiedName::new(Ident::new("events")),
+                columns: vec![{
+                    let mut c = make_column("created_at", SqliteType::Text);
+                    c.default = Some(Expr::CurrentTimestamp);
+                    c
+                }],
+                constraints: vec![],
+            }],
+            ..Default::default()
+        };
+
+        let sql = render(&model, false);
+        assert!(sql.contains("DEFAULT (CURRENT_TIMESTAMP)"));
+    }
+}

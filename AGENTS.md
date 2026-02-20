@@ -1,6 +1,6 @@
 # Agent Instructions
 
-This document provides guidance for AI coding assistants working on pg2sqlc-rs.
+This document provides guidance for AI coding assistants working on pg2sqlite-rs.
 
 ## Project Overview
 
@@ -11,8 +11,8 @@ This document provides guidance for AI coding assistants working on pg2sqlc-rs.
 ## Architecture
 
 ```text
-pg2sqlc-rs/
-├── core/                 # Library crate (pg2sqlc-core)
+pg2sqlite-rs/
+├── core/                 # Library crate (pg2sqlite-core)
 │   └── src/
 │       ├── lib.rs        # Public API: convert_pg_ddl_to_sqlite()
 │       ├── pg/           # PostgreSQL DDL parsing (sqlparser wrapper)
@@ -36,7 +36,7 @@ pg2sqlc-rs/
 │       └── diagnostics/  # Warning/error system
 │           ├── warning.rs    # Warning struct, Severity enum, codes
 │           └── reporter.rs   # Output formatting, strict mode
-├── cli/                  # Binary crate (pg2sqlc)
+├── cli/                  # Binary crate (pg2sqlite)
 │   └── src/main.rs       # CLI entry point (thin wrapper)
 ├── tests/                # Integration & golden tests
 │   ├── fixtures/         # PostgreSQL DDL input files
