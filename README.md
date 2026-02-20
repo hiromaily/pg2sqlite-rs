@@ -27,6 +27,12 @@ Built with [Claude Code](https://www.anthropic.com/claude-code).
 
 ## Installation
 
+### Cargo (crates.io)
+
+```bash
+cargo install pg2sqlite
+```
+
 ### Homebrew (macOS/Linux)
 
 ```bash
@@ -293,6 +299,10 @@ make watch           # Watch and test on change
 1. Add a PostgreSQL DDL file to `tests/fixtures/`
 2. Add the expected SQLite output to `tests/golden/`
 3. Run `make test` to verify
+
+## Verifying Output
+
+You can verify the generated SQLite DDL by pasting it into [SQLite Online](https://sqliteonline.com/) and confirming it executes without errors.
 
 ## Exit Codes
 
