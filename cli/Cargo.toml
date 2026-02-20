@@ -15,7 +15,7 @@ name = "pg2sqlite"
 path = "src/main.rs"
 
 [dependencies]
-pg2sqlite-core = { path = "../core" }
+pg2sqlite-core = { version = "0.1.1", path = "../core" }
 clap = { version = "4.5", features = ["derive", "cargo"] }
 colored = "2.1"
 anyhow = "1.0"
