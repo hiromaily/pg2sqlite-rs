@@ -1,4 +1,4 @@
-//! pg2sqlc-core: PostgreSQL 16 DDL to SQLite3 DDL converter library.
+//! pg2sqlite-core: PostgreSQL 16 DDL to SQLite3 DDL converter library.
 
 pub mod diagnostics;
 pub mod ir;

@@ -4,7 +4,7 @@ When the user asks to create a GitHub issue (e.g., "issueを作成して", "crea
 
 ## Project Context
 
-- **Repository**: hiromaily/pg2sqlc-rs
+- **Repository**: hiromaily/pg2sqlite-rs
 - **Purpose**: PostgreSQL 16 DDL to SQLite3 DDL schema converter written in Rust
 - **Structure**: Cargo workspace with `core` (library) and `cli` (binary) crates
 
@@ -12,13 +12,13 @@ When the user asks to create a GitHub issue (e.g., "issueを作成して", "crea
 
 ### Title Conventions
 
-| Type        | Format                          | Example                                       |
-| ----------- | ------------------------------- | --------------------------------------------- |
-| New Feature | `feat: Add feature description` | `feat: Add DOMAIN type conversion support`    |
-| Bug Fix     | `fix: Brief description`        | `fix: Incorrect type mapping for NUMERIC`     |
-| Enhancement | `feat: Improve description`     | `feat: Improve ALTER TABLE constraint merging`|
-| CLI Option  | `feat: Add \`--flag\` option`   | `feat: Add \`--strict\` mode`                 |
-| Docs        | `docs: Description`             | `docs: Add type mapping examples`             |
+| Type        | Format                          | Example                                        |
+| ----------- | ------------------------------- | ---------------------------------------------- |
+| New Feature | `feat: Add feature description` | `feat: Add DOMAIN type conversion support`     |
+| Bug Fix     | `fix: Brief description`        | `fix: Incorrect type mapping for NUMERIC`      |
+| Enhancement | `feat: Improve description`     | `feat: Improve ALTER TABLE constraint merging` |
+| CLI Option  | `feat: Add \`--flag\` option`   | `feat: Add \`--strict\` mode`                  |
+| Docs        | `docs: Description`             | `docs: Add type mapping examples`              |
 
 ### Labels
 
@@ -37,7 +37,7 @@ When the user asks to create a GitHub issue (e.g., "issueを作成して", "crea
 
 ## Issue Template
 
-```markdown
+````markdown
 ## Summary
 
 [1-2 sentence description]
@@ -54,6 +54,7 @@ When the user asks to create a GitHub issue (e.g., "issueを作成して", "crea
 ```sql
 -- Example PG DDL
 ```
+````
 
 ### Expected Output (SQLite DDL)
 
@@ -78,7 +79,8 @@ When the user asks to create a GitHub issue (e.g., "issueを作成して", "crea
 ## Priority
 
 [High / Medium / Low] - [Brief reason]
-```
+
+````
 
 ## Command to Use
 
@@ -103,7 +105,7 @@ gh issue create \
 ...
 EOF
 )"
-```
+````
 
 ## Before Creating Issues
 

@@ -2,11 +2,11 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 use clap::Parser;
-use pg2sqlc_core::diagnostics::{WarningDestination, report_warnings};
-use pg2sqlc_core::{ConvertOptions, convert_pg_ddl_to_sqlite};
+use pg2sqlite_core::diagnostics::{WarningDestination, report_warnings};
+use pg2sqlite_core::{ConvertOptions, convert_pg_ddl_to_sqlite};
 
 #[derive(Parser, Debug)]
-#[command(name = "pg2sqlc", about = "Convert PostgreSQL 16 DDL to SQLite3 DDL")]
+#[command(name = "pg2sqlite", about = "Convert PostgreSQL 16 DDL to SQLite3 DDL")]
 #[command(version)]
 struct Cli {
     /// PostgreSQL DDL input file (UTF-8)

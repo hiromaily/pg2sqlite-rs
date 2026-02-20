@@ -1,11 +1,11 @@
 ## 1. Project Setup & Dependencies
 
 - [x] 1.1 Update workspace Cargo.toml: remove yaml-rust2/serde_yaml/regex/indexmap, add sqlparser
-- [x] 1.2 Update core/Cargo.toml: set crate name to pg2sqlc-core, add sqlparser and thiserror dependencies
-- [x] 1.3 Update cli/Cargo.toml: set crate name to pg2sqlc, add clap/anyhow/colored dependencies, remove walkdir/ignore/is-terminal
+- [x] 1.2 Update core/Cargo.toml: set crate name to pg2sqlite-core, add sqlparser and thiserror dependencies
+- [x] 1.3 Update cli/Cargo.toml: set crate name to pg2sqlite, add clap/anyhow/colored dependencies, remove walkdir/ignore/is-terminal
 - [x] 1.4 Remove all existing yaml-lint source files from core/src/ and cli/src/
 - [x] 1.5 Create module directory structure: core/src/{pg,ir,transform,sqlite,diagnostics}/mod.rs
-- [x] 1.6 Update Makefile targets (make/test.mk, make/cli.mk) for pg2sqlc commands and SQL fixtures
+- [x] 1.6 Update Makefile targets (make/test.mk, make/cli.mk) for pg2sqlite commands and SQL fixtures
 
 ## 2. IR Data Model
 

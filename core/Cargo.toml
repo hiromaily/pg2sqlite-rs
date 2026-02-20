@@ -1,5 +1,5 @@
 [package]
-name = "pg2sqlc-core"
+name = "pg2sqlite-core"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true

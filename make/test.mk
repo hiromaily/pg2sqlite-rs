@@ -30,7 +30,7 @@ validate-fixtures: release
 	@echo ""
 	@for f in tests/fixtures/*.sql; do \
 		printf "  %-50s " "$$f:"; \
-		if ./target/release/pg2sqlc --input "$$f" > /dev/null 2>&1; then \
+		if ./target/release/pg2sqlite --input "$$f" > /dev/null 2>&1; then \
 			echo "✓ PASS"; \
 		else \
 			echo "✗ FAIL"; \
@@ -46,6 +46,6 @@ validate-fixtures-detail: release
 	@echo ""
 	@for f in tests/fixtures/*.sql; do \
 		echo "--- $$f ---"; \
-		./target/release/pg2sqlc --input "$$f" 2>&1 || true; \
+		./target/release/pg2sqlite --input "$$f" 2>&1 || true; \
 		echo ""; \
 	done

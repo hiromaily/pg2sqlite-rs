@@ -7,7 +7,7 @@ version = "0.1.0"
 edition = "2024"
 authors = ["Hiroki Yasui"]
 license = "MIT"
-repository = "https://github.com/hiromaily/pg2sqlc-rs"
+repository = "https://github.com/hiromaily/pg2sqlite-rs"
 
 [workspace.dependencies]
 # Shared dependencies across workspace

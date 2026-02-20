@@ -2,7 +2,7 @@
 
 use std::path::PathBuf;
 
-use pg2sqlc_core::{ConvertOptions, convert_pg_ddl_to_sqlite};
+use pg2sqlite_core::{ConvertOptions, convert_pg_ddl_to_sqlite};
 
 /// Resolve a path relative to the workspace root (parent of core/).
 fn workspace_path(rel: &str) -> PathBuf {
