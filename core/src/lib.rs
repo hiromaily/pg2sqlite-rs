@@ -112,7 +112,7 @@ pub fn convert_pg_ddl_to_sqlite(
 
     // 8. Topological sort (if FK enabled)
     if opts.enable_foreign_keys {
-        transform::topo::topological_sort(&mut model.tables);
+        transform::topo::topological_sort(&mut model.tables, &mut warnings);
     } else {
         // Alphabetical order when FKs disabled
         model

@@ -181,6 +181,10 @@ fn parse_table_constraint(
                 columns: cols,
             })
         }
+        // Note:
+        // The parser hardcodes deferrable: false for foreign key constraints.
+        // PostgreSQL supports DEFERRABLE characteristics which should be extracted from the sqlparser AST
+        // to ensure accurate transformation and warning emission later in the pipeline.
         SqlConstraint::ForeignKey {
             name,
             columns,
@@ -322,7 +326,12 @@ fn convert_data_type(dt: &DataType) -> PgType {
             name: dt.to_string(),
         },
         DataType::Custom(name, _) => {
-            let type_name = name.to_string().to_lowercase();
+            // Use the last part of the name to handle schema-qualified types (e.g., pg_catalog.serial)
+            let type_name = name
+                .0
+                .last()
+                .map(|id| id.value.to_lowercase())
+                .unwrap_or_default();
             match type_name.as_str() {
                 "serial" => PgType::Serial,
                 "bigserial" => PgType::BigSerial,

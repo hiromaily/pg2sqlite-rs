@@ -14,10 +14,7 @@ fn merge_alter_constraints(model: &mut SchemaModel, warnings: &mut Vec<Warning>)
     let alters = std::mem::take(&mut model.alter_constraints);
 
     for alter in alters {
-        let target_table = model
-            .tables
-            .iter_mut()
-            .find(|t| t.name.name.normalized == alter.table.name.normalized);
+        let target_table = model.tables.iter_mut().find(|t| t.name == alter.table);
 
         match target_table {
             Some(table) => {
@@ -135,16 +132,16 @@ fn resolve_serials(model: &mut SchemaModel, warnings: &mut Vec<Warning>) {
 
 /// Resolve enum columns: replace PgType::Other with PgType::Enum where a matching enum exists.
 fn resolve_enums(model: &mut SchemaModel, _warnings: &mut [Warning]) {
-    let enum_names: Vec<(String, Vec<String>)> = model
+    let enum_names: std::collections::HashSet<String> = model
         .enums
         .iter()
-        .map(|e| (e.name.name.normalized.clone(), e.values.clone()))
+        .map(|e| e.name.name.normalized.clone())
         .collect();
 
     for table in &mut model.tables {
         for col in &mut table.columns {
             if let PgType::Other { name } = &col.pg_type {
-                if let Some((_, _values)) = enum_names.iter().find(|(n, _)| n == name) {
+                if enum_names.contains(name) {
                     col.pg_type = PgType::Enum { name: name.clone() };
                 }
             }

@@ -1,11 +1,12 @@
 /// Topological sort for FK dependencies.
 use std::collections::{HashMap, HashSet, VecDeque};
 
+use crate::diagnostics::{Severity, Warning, warning};
 use crate::ir::{Table, TableConstraint};
 
 /// Sort tables in dependency order (tables referenced by FKs come first).
 /// Falls back to alphabetical order if cycles are detected.
-pub fn topological_sort(tables: &mut Vec<Table>) {
+pub fn topological_sort(tables: &mut Vec<Table>, warnings: &mut Vec<Warning>) {
     let name_to_idx: HashMap<String, usize> = tables
         .iter()
         .enumerate()
@@ -86,6 +87,20 @@ pub fn topological_sort(tables: &mut Vec<Table>) {
         *tables = sorted;
     } else {
         // Cycle detected — fall back to alphabetical
+        let cycle_tables: Vec<String> = tables
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| in_degree[*i] > 0)
+            .map(|(_, t)| t.name.name.normalized.clone())
+            .collect();
+        warnings.push(Warning::new(
+            warning::FK_CYCLE_DETECTED,
+            Severity::Lossy,
+            format!(
+                "Foreign key dependency cycle detected among tables: {}; falling back to alphabetical order",
+                cycle_tables.join(", ")
+            ),
+        ));
         tables.sort_by(|a, b| a.name.name.normalized.cmp(&b.name.name.normalized));
     }
 }
@@ -137,53 +152,61 @@ mod tests {
 
     #[test]
     fn test_no_deps_alphabetical() {
+        let mut warnings = Vec::new();
         let mut tables = vec![
             make_table("c", vec![]),
             make_table("a", vec![]),
             make_table("b", vec![]),
         ];
-        topological_sort(&mut tables);
+        topological_sort(&mut tables, &mut warnings);
         let names: Vec<&str> = tables
             .iter()
             .map(|t| t.name.name.normalized.as_str())
             .collect();
         assert_eq!(names, vec!["a", "b", "c"]);
+        assert!(warnings.is_empty());
     }
 
     #[test]
     fn test_simple_dependency() {
+        let mut warnings = Vec::new();
         let mut tables = vec![
             make_table("orders", vec!["users"]),
             make_table("users", vec![]),
         ];
-        topological_sort(&mut tables);
+        topological_sort(&mut tables, &mut warnings);
         let names: Vec<&str> = tables
             .iter()
             .map(|t| t.name.name.normalized.as_str())
             .collect();
         assert_eq!(names[0], "users");
         assert_eq!(names[1], "orders");
+        assert!(warnings.is_empty());
     }
 
     #[test]
     fn test_cycle_falls_back_to_alphabetical() {
+        let mut warnings = Vec::new();
         let mut tables = vec![make_table("b", vec!["a"]), make_table("a", vec!["b"])];
-        topological_sort(&mut tables);
+        topological_sort(&mut tables, &mut warnings);
         let names: Vec<&str> = tables
             .iter()
             .map(|t| t.name.name.normalized.as_str())
             .collect();
         assert_eq!(names, vec!["a", "b"]);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].code, "FK_CYCLE_DETECTED");
     }
 
     #[test]
     fn test_chain_dependency() {
+        let mut warnings = Vec::new();
         let mut tables = vec![
             make_table("c", vec!["b"]),
             make_table("b", vec!["a"]),
             make_table("a", vec![]),
         ];
-        topological_sort(&mut tables);
+        topological_sort(&mut tables, &mut warnings);
         let names: Vec<&str> = tables
             .iter()
             .map(|t| t.name.name.normalized.as_str())
