@@ -389,10 +389,10 @@ fn convert_sql_expr(expr: &SqlExpr) -> Expr {
             };
 
             // Detect nextval('sequence_name')
-            if func_name == "nextval" {
-                if let Some(Expr::StringLiteral(seq)) = args.first() {
-                    return Expr::NextVal(seq.clone());
-                }
+            if func_name == "nextval"
+                && let Some(Expr::StringLiteral(seq)) = args.first()
+            {
+                return Expr::NextVal(seq.clone());
             }
 
             Expr::FunctionCall {

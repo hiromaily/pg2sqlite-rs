@@ -20,12 +20,12 @@ pub fn topological_sort(tables: &mut Vec<Table>, warnings: &mut Vec<Warning>) {
     for (i, table) in tables.iter().enumerate() {
         let deps = get_fk_dependencies(table);
         for dep_name in deps {
-            if let Some(&dep_idx) = name_to_idx.get(&dep_name) {
-                if dep_idx != i {
-                    // dep must come before i
-                    dependents[dep_idx].push(i);
-                    in_degree[i] += 1;
-                }
+            if let Some(&dep_idx) = name_to_idx.get(&dep_name)
+                && dep_idx != i
+            {
+                // dep must come before i
+                dependents[dep_idx].push(i);
+                in_degree[i] += 1;
             }
         }
     }

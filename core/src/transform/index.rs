@@ -20,17 +20,17 @@ fn transform_index(index: &Index, warnings: &mut Vec<Warning>) -> Option<Index> 
     let obj = index.name.normalized.clone();
 
     // Warn about non-btree methods
-    if let Some(method) = &index.method {
-        if *method != IndexMethod::Btree {
-            warnings.push(
-                Warning::new(
-                    warning::INDEX_METHOD_IGNORED,
-                    Severity::Info,
-                    format!("index method '{method}' ignored; SQLite only supports btree"),
-                )
-                .with_object(&obj),
-            );
-        }
+    if let Some(method) = &index.method
+        && *method != IndexMethod::Btree
+    {
+        warnings.push(
+            Warning::new(
+                warning::INDEX_METHOD_IGNORED,
+                Severity::Info,
+                format!("index method '{method}' ignored; SQLite only supports btree"),
+            )
+            .with_object(&obj),
+        );
     }
 
     // Transform WHERE clause

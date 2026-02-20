@@ -140,10 +140,10 @@ fn resolve_enums(model: &mut SchemaModel, _warnings: &mut [Warning]) {
 
     for table in &mut model.tables {
         for col in &mut table.columns {
-            if let PgType::Other { name } = &col.pg_type {
-                if enum_names.contains(name) {
-                    col.pg_type = PgType::Enum { name: name.clone() };
-                }
+            if let PgType::Other { name } = &col.pg_type
+                && enum_names.contains(name)
+            {
+                col.pg_type = PgType::Enum { name: name.clone() };
             }
         }
     }

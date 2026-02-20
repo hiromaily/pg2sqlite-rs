@@ -101,31 +101,31 @@ fn handle_integer_pk(table: &mut Table) {
         |c| matches!(c, TableConstraint::PrimaryKey { columns, .. } if columns.len() == 1),
     );
 
-    if let Some(pk_idx) = pk_constraint {
-        if let TableConstraint::PrimaryKey { columns, .. } = &table.constraints[pk_idx] {
-            let pk_col_name = columns[0].normalized.clone();
+    if let Some(pk_idx) = pk_constraint
+        && let TableConstraint::PrimaryKey { columns, .. } = &table.constraints[pk_idx]
+    {
+        let pk_col_name = columns[0].normalized.clone();
 
-            // Check if the column is an integer type
-            let col = table
-                .columns
-                .iter_mut()
-                .find(|c| c.name.normalized == pk_col_name);
-            if let Some(col) = col {
-                let is_integer = matches!(col.sqlite_type, Some(SqliteType::Integer))
-                    || matches!(
-                        col.pg_type,
-                        PgType::Integer
-                            | PgType::BigInt
-                            | PgType::SmallInt
-                            | PgType::Serial
-                            | PgType::BigSerial
-                            | PgType::SmallSerial
-                    );
+        // Check if the column is an integer type
+        let col = table
+            .columns
+            .iter_mut()
+            .find(|c| c.name.normalized == pk_col_name);
+        if let Some(col) = col {
+            let is_integer = matches!(col.sqlite_type, Some(SqliteType::Integer))
+                || matches!(
+                    col.pg_type,
+                    PgType::Integer
+                        | PgType::BigInt
+                        | PgType::SmallInt
+                        | PgType::Serial
+                        | PgType::BigSerial
+                        | PgType::SmallSerial
+                );
 
-                if is_integer {
-                    col.is_primary_key = true;
-                    table.constraints.remove(pk_idx);
-                }
+            if is_integer {
+                col.is_primary_key = true;
+                table.constraints.remove(pk_idx);
             }
         }
     }
