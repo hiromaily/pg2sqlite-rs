@@ -164,8 +164,8 @@ jobs:
 
           # Homebrew formula for pg2sqlite
           # Repository: https://github.com/hiromaily/homebrew-tap
-          class YamlLint < Formula
-            desc "A fast YAML linter written in Rust"
+          class Pg2sqlite < Formula
+            desc "PostgreSQL 16 DDL to SQLite3 DDL schema converter"
             homepage "https://github.com/hiromaily/pg2sqlite-rs"
             version "VERSION_PLACEHOLDER"
             license "MIT"
@@ -199,16 +199,17 @@ jobs:
             end
 
             test do
-              # Create a test YAML file
-              (testpath/"test.yaml").write <<~EOS
-                key: value
-                list:
-                  - item1
-                  - item2
+              # Create a test PostgreSQL DDL file
+              (testpath/"test.sql").write <<~EOS
+                CREATE TABLE users (
+                  id INTEGER PRIMARY KEY,
+                  name TEXT NOT NULL
+                );
               EOS
 
-              # Run pg2sqlite and check it exits successfully
-              system "#{bin}/pg2sqlite", testpath/"test.yaml"
+              # Run pg2sqlite and check it produces output
+              output = shell_output("#{bin}/pg2sqlite -i #{testpath}/test.sql")
+              assert_match "CREATE TABLE", output
             end
           end
           FORMULA_EOF

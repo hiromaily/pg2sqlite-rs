@@ -17,6 +17,7 @@ TARGETS := x86_64-apple-darwin aarch64-apple-darwin x86_64-unknown-linux-gnu aar
 # 1. Set the new version
 # ```
 # make set-version V=0.2.0
+# make release-prepare
 # ```
 #
 # 2. Update CHANGELOG.md (move [Unreleased] items to new version section)
@@ -57,6 +58,7 @@ bump-major:
 
 # Set specific version
 # Usage: make set-version V=0.2.0
+# `cargo install cargo-edit` may be required
 .PHONY: set-version
 set-version:
 	@if [ -z "$(V)" ]; then echo "Usage: make set-version V=0.2.0"; exit 1; fi
