@@ -445,45 +445,43 @@ fn convert_sql_expr(expr: &SqlExpr) -> Expr {
         },
         SqlExpr::Nested(inner) => Expr::Nested(Box::new(convert_sql_expr(inner))),
         // col = ANY(ARRAY['a', 'b']) → col IN ('a', 'b')
+        // Only convert when the right-hand side is an ARRAY literal.
+        // Non-array forms (e.g., subqueries) fall through to Raw to avoid
+        // producing a semantically incorrect single-element InList.
         SqlExpr::AnyOp {
             left,
             compare_op: BinaryOperator::Eq,
             right,
             ..
-        } => {
-            let left_expr = convert_sql_expr(left);
-            let list = extract_array_elements(right);
-            Expr::InList {
-                expr: Box::new(left_expr),
-                list,
-                negated: false,
+        } => match extract_array_elements(right) {
+            Some(list) => {
+                let left_expr = convert_sql_expr(left);
+                Expr::InList {
+                    expr: Box::new(left_expr),
+                    list,
+                    negated: false,
+                }
             }
-        }
-        // col != ANY(ARRAY['a', 'b']) → col NOT IN ('a', 'b')
-        SqlExpr::AnyOp {
-            left,
-            compare_op: BinaryOperator::NotEq,
-            right,
-            ..
-        } => {
-            let left_expr = convert_sql_expr(left);
-            let list = extract_array_elements(right);
-            Expr::InList {
-                expr: Box::new(left_expr),
-                list,
-                negated: true,
-            }
-        }
+            None => Expr::Raw(expr.to_string()),
+        },
+        // Note: `expr != ANY(ARRAY[...])` is NOT equivalent to `NOT IN (...)`.
+        // `!= ANY` is true if expr differs from *at least one* element,
+        // whereas `NOT IN` requires expr to differ from *all* elements.
+        // The correct equivalent of `NOT IN` is `!= ALL(...)`, not `!= ANY(...)`.
+        // We let `!= ANY` fall through to the Raw fallback below.
+        //
         // Fallback: render back to SQL string
         _ => Expr::Raw(expr.to_string()),
     }
 }
 
-/// Extract elements from an ARRAY expression, falling back to a single Raw element.
-fn extract_array_elements(expr: &SqlExpr) -> Vec<Expr> {
+/// Extract elements from an ARRAY literal expression.
+/// Returns `None` for non-array expressions (e.g., subqueries) so callers
+/// can fall back to `Expr::Raw` instead of producing incorrect results.
+fn extract_array_elements(expr: &SqlExpr) -> Option<Vec<Expr>> {
     match expr {
-        SqlExpr::Array(Array { elem, .. }) => elem.iter().map(convert_sql_expr).collect(),
-        other => vec![convert_sql_expr(other)],
+        SqlExpr::Array(Array { elem, .. }) => Some(elem.iter().map(convert_sql_expr).collect()),
+        _ => None,
     }
 }
 
