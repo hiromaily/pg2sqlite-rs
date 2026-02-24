@@ -11,5 +11,5 @@ keywords = ["postgresql", "sqlite", "ddl", "converter", "schema"]
 categories = ["development-tools", "command-line-utilities", "database"]
 
 [dependencies]
-sqlparser = { version = "0.53", features = ["visitor"] }
+sqlparser = { version = "0.61", features = ["std", "visitor", "recursive-protection"] }
 thiserror = { workspace = true }

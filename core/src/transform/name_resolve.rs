@@ -150,6 +150,7 @@ mod tests {
                 default: None,
                 is_primary_key: false,
                 is_unique: false,
+                autoincrement: false,
                 references: None,
                 check: None,
             }],
