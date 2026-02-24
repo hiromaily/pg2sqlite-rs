@@ -14,7 +14,7 @@ Built with [Claude Code](https://www.anthropic.com/claude-code).
 
 ## Features
 
-- ✅ PostgreSQL 16 DDL parsing via [sqlparser](https://github.com/sqlparser-rs/sqlparser-rs)
+- ✅ PostgreSQL 16 DDL parsing via [sqlparser](https://github.com/apache/datafusion-sqlparser-rs)
 - ✅ Comprehensive type mapping (INTEGER, TEXT, REAL, NUMERIC, BLOB)
 - ✅ Constraint conversion (PK, UNIQUE, FK, CHECK)
 - ✅ SERIAL/BIGSERIAL → INTEGER PRIMARY KEY AUTOINCREMENT

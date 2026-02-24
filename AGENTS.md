@@ -108,7 +108,7 @@ pub struct ConvertResult {
 
 ## Dependencies
 
-- `sqlparser` — PostgreSQL dialect SQL parser (core)
+- `sqlparser` — PostgreSQL dialect SQL parser (core) — **key dependency**, see `docs/sqlparser-rs.md`
 - `clap` — CLI argument parsing with derive (cli)
 - `thiserror` — Structured error types (core)
 - `anyhow` — CLI error handling (cli)
@@ -119,3 +119,4 @@ pub struct ConvertResult {
 - `docs/postgres-to-sqlite.md` — Base specification (pipeline, IR, CLI, conversion rules)
 - `docs/postgres-to-sqlite-rule.md` — Detailed type/constraint/default/index mapping tables
 - `docs/development-by-rust.md` — Rust module design proposal
+- `docs/sqlparser-rs.md` — sqlparser-rs reference & upgrade guide
