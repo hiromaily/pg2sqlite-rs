@@ -96,3 +96,12 @@ fn test_golden_check_constraint() {
         &ConvertOptions::default(),
     );
 }
+
+#[test]
+fn test_golden_alter_identity() {
+    run_golden_test(
+        "tests/fixtures/alter_identity.sql",
+        "tests/golden/alter_identity.out.sql",
+        &ConvertOptions::default(),
+    );
+}

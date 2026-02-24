@@ -2,18 +2,81 @@
 ///
 /// Converts sqlparser AST into our internal representation (IR).
 use sqlparser::ast::{
-    self, AlterTableOperation, Array, ArrayElemTypeDef, BinaryOperator, ColumnDef, ColumnOption,
-    CreateIndex, DataType, Expr as SqlExpr, ObjectName, ReferentialAction, Statement,
-    TableConstraint as SqlConstraint, UserDefinedTypeRepresentation,
+    self, AlterColumnOperation, AlterTableOperation, Array, ArrayElemTypeDef, BinaryOperator,
+    ColumnDef, ColumnOption, CreateIndex, DataType, Expr as SqlExpr, ObjectName, ObjectNamePart,
+    ReferentialAction, Statement, TableConstraint as SqlConstraint, UserDefinedTypeRepresentation,
+    ValueWithSpan,
 };
 use sqlparser::dialect::PostgreSqlDialect;
 use sqlparser::parser::Parser;
 
 use crate::diagnostics::warning::{self, Severity, Warning};
 use crate::ir::{
-    AlterConstraint, Column, EnumDef, Expr, FkAction, ForeignKeyRef, Ident, Index, IndexColumn,
-    IndexMethod, PgType, QualifiedName, SchemaModel, Sequence, Table, TableConstraint,
+    AlterConstraint, AlterIdentity, Column, EnumDef, Expr, FkAction, ForeignKeyRef, Ident, Index,
+    IndexColumn, IndexMethod, PgType, QualifiedName, SchemaModel, Sequence, Table, TableConstraint,
 };
+
+/// Strip the parenthesized sequence-options block from `AS IDENTITY (...)` statements.
+///
+/// pg_dump emits sequence options (SEQUENCE NAME, START WITH, INCREMENT BY, etc.)
+/// inside the identity block in an order that sqlparser cannot parse.
+/// Since we only need to know the column has identity (not the sequence details),
+/// we strip the entire parenthesized block.
+fn strip_identity_options(input: &str) -> String {
+    let upper = input.to_uppercase();
+    let mut result = String::with_capacity(input.len());
+    let mut pos = 0;
+
+    while pos < input.len() {
+        if let Some(idx) = upper[pos..].find("AS IDENTITY") {
+            let identity_end = pos + idx + "AS IDENTITY".len();
+            result.push_str(&input[pos..identity_end]);
+            pos = identity_end;
+
+            // Skip whitespace then look for '('
+            let rest = &input[pos..];
+            let trimmed = rest.trim_start();
+            if trimmed.starts_with('(') {
+                let ws_len = rest.len() - trimmed.len();
+                let paren_start = pos + ws_len;
+                // Find matching closing paren
+                if let Some(close) = find_matching_paren(input, paren_start) {
+                    pos = close + 1; // skip past ')'
+                    continue;
+                }
+            }
+        } else {
+            result.push_str(&input[pos..]);
+            break;
+        }
+    }
+
+    result
+}
+
+/// Find the position of the closing ')' matching the '(' at `start`.
+fn find_matching_paren(input: &str, start: usize) -> Option<usize> {
+    let bytes = input.as_bytes();
+    if bytes[start] != b'(' {
+        return None;
+    }
+    let mut depth = 1;
+    let mut i = start + 1;
+    while i < bytes.len() && depth > 0 {
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
+}
 
 /// Parse PostgreSQL DDL text into an IR SchemaModel.
 pub fn parse(input: &str) -> (SchemaModel, Vec<Warning>) {
@@ -21,7 +84,8 @@ pub fn parse(input: &str) -> (SchemaModel, Vec<Warning>) {
     let mut model = SchemaModel::default();
     let mut warnings = Vec::new();
 
-    let statements = match Parser::parse_sql(&dialect, input) {
+    let cleaned = strip_identity_options(input);
+    let statements = match Parser::parse_sql(&dialect, &cleaned) {
         Ok(stmts) => stmts,
         Err(e) => {
             warnings.push(Warning::new(
@@ -51,20 +115,19 @@ pub fn parse(input: &str) -> (SchemaModel, Vec<Warning>) {
                     owned_by: None,
                 });
             }
-            Statement::AlterTable {
-                name, operations, ..
-            } => {
-                let table_name = convert_object_name(&name);
-                for op in operations {
-                    if let Some(constraint) = parse_alter_table_op(&table_name, &op, &mut warnings)
-                    {
-                        model.alter_constraints.push(constraint);
+            Statement::AlterTable(alter_table) => {
+                let table_name = convert_object_name(&alter_table.name);
+                for op in &alter_table.operations {
+                    match parse_alter_table_op(&table_name, op, &mut warnings) {
+                        AlterResult::Constraint(c) => model.alter_constraints.push(c),
+                        AlterResult::Identity(id) => model.identity_columns.push(id),
+                        AlterResult::None => {}
                     }
                 }
             }
             Statement::CreateType {
                 name,
-                representation: UserDefinedTypeRepresentation::Enum { labels },
+                representation: Some(UserDefinedTypeRepresentation::Enum { labels }),
                 ..
             } => {
                 let values: Vec<String> = labels.into_iter().map(|v| v.to_string()).collect();
@@ -120,30 +183,23 @@ fn parse_column(col_def: &ColumnDef) -> Column {
             ColumnOption::Default(expr) => {
                 default = Some(convert_sql_expr(expr));
             }
-            ColumnOption::Unique { is_primary, .. } => {
-                if *is_primary {
-                    is_primary_key = true;
-                } else {
-                    is_unique = true;
-                }
+            ColumnOption::PrimaryKey(_) => {
+                is_primary_key = true;
             }
-            ColumnOption::ForeignKey {
-                foreign_table,
-                referred_columns,
-                on_delete,
-                on_update,
-                ..
-            } => {
-                let ref_col = referred_columns.first().map(|c| Ident::new(&c.value));
+            ColumnOption::Unique(_) => {
+                is_unique = true;
+            }
+            ColumnOption::ForeignKey(fk) => {
+                let ref_col = fk.referred_columns.first().map(|c| Ident::new(&c.value));
                 references = Some(ForeignKeyRef {
-                    table: convert_object_name(foreign_table),
+                    table: convert_object_name(&fk.foreign_table),
                     column: ref_col,
-                    on_delete: on_delete.as_ref().and_then(convert_referential_action),
-                    on_update: on_update.as_ref().and_then(convert_referential_action),
+                    on_delete: fk.on_delete.as_ref().and_then(convert_referential_action),
+                    on_update: fk.on_update.as_ref().and_then(convert_referential_action),
                 });
             }
-            ColumnOption::Check(expr) => {
-                check = Some(convert_sql_expr(expr));
+            ColumnOption::Check(ck) => {
+                check = Some(convert_sql_expr(&ck.expr));
             }
             _ => {}
         }
@@ -157,6 +213,7 @@ fn parse_column(col_def: &ColumnDef) -> Column {
         default,
         is_primary_key,
         is_unique,
+        autoincrement: false,
         references,
         check,
     }
@@ -167,47 +224,44 @@ fn parse_table_constraint(
     _warnings: &mut [Warning],
 ) -> Option<TableConstraint> {
     match constraint {
-        SqlConstraint::PrimaryKey { columns, name, .. } => {
-            let cols: Vec<Ident> = columns.iter().map(|c| Ident::new(&c.value)).collect();
+        SqlConstraint::PrimaryKey(pk) => {
+            let cols: Vec<Ident> = pk
+                .columns
+                .iter()
+                .map(|c| Ident::new(&c.column.expr.to_string()))
+                .collect();
             Some(TableConstraint::PrimaryKey {
-                name: name.as_ref().map(|n| Ident::new(&n.value)),
+                name: pk.name.as_ref().map(|n| Ident::new(&n.value)),
                 columns: cols,
             })
         }
-        SqlConstraint::Unique { columns, name, .. } => {
-            let cols: Vec<Ident> = columns.iter().map(|c| Ident::new(&c.value)).collect();
+        SqlConstraint::Unique(uq) => {
+            let cols: Vec<Ident> = uq
+                .columns
+                .iter()
+                .map(|c| Ident::new(&c.column.expr.to_string()))
+                .collect();
             Some(TableConstraint::Unique {
-                name: name.as_ref().map(|n| Ident::new(&n.value)),
+                name: uq.name.as_ref().map(|n| Ident::new(&n.value)),
                 columns: cols,
             })
         }
-        // Note:
-        // The parser hardcodes deferrable: false for foreign key constraints.
-        // PostgreSQL supports DEFERRABLE characteristics which should be extracted from the sqlparser AST
-        // to ensure accurate transformation and warning emission later in the pipeline.
-        SqlConstraint::ForeignKey {
-            name,
-            columns,
-            foreign_table,
-            referred_columns,
-            on_delete,
-            on_update,
-            ..
-        } => Some(TableConstraint::ForeignKey {
-            name: name.as_ref().map(|n| Ident::new(&n.value)),
-            columns: columns.iter().map(|c| Ident::new(&c.value)).collect(),
-            ref_table: convert_object_name(foreign_table),
-            ref_columns: referred_columns
+        SqlConstraint::ForeignKey(fk) => Some(TableConstraint::ForeignKey {
+            name: fk.name.as_ref().map(|n| Ident::new(&n.value)),
+            columns: fk.columns.iter().map(|c| Ident::new(&c.value)).collect(),
+            ref_table: convert_object_name(&fk.foreign_table),
+            ref_columns: fk
+                .referred_columns
                 .iter()
                 .map(|c| Ident::new(&c.value))
                 .collect(),
-            on_delete: on_delete.as_ref().and_then(convert_referential_action),
-            on_update: on_update.as_ref().and_then(convert_referential_action),
+            on_delete: fk.on_delete.as_ref().and_then(convert_referential_action),
+            on_update: fk.on_update.as_ref().and_then(convert_referential_action),
             deferrable: false,
         }),
-        SqlConstraint::Check { name, expr } => Some(TableConstraint::Check {
-            name: name.as_ref().map(|n| Ident::new(&n.value)),
-            expr: convert_sql_expr(expr),
+        SqlConstraint::Check(ck) => Some(TableConstraint::Check {
+            name: ck.name.as_ref().map(|n| Ident::new(&n.value)),
+            expr: convert_sql_expr(&ck.expr),
         }),
         _ => None,
     }
@@ -220,7 +274,7 @@ fn parse_create_index(ci: &CreateIndex, _warnings: &mut [Warning]) -> Option<Ind
 
     let mut columns = Vec::new();
     for col in &ci.columns {
-        let col_name = col.expr.to_string();
+        let col_name = col.column.expr.to_string();
         // Check if this looks like a function call / expression
         if col_name.contains('(') {
             columns.push(IndexColumn::Expression(Expr::Raw(col_name)));
@@ -229,18 +283,15 @@ fn parse_create_index(ci: &CreateIndex, _warnings: &mut [Warning]) -> Option<Ind
         }
     }
 
-    let method = ci
-        .using
-        .as_ref()
-        .and_then(|m| match m.value.to_lowercase().as_str() {
-            "btree" => Some(IndexMethod::Btree),
-            "hash" => Some(IndexMethod::Hash),
-            "gin" => Some(IndexMethod::Gin),
-            "gist" => Some(IndexMethod::Gist),
-            "spgist" => Some(IndexMethod::SpGist),
-            "brin" => Some(IndexMethod::Brin),
-            _ => None,
-        });
+    let method = ci.using.as_ref().and_then(|m| match m {
+        ast::IndexType::BTree => Some(IndexMethod::Btree),
+        ast::IndexType::Hash => Some(IndexMethod::Hash),
+        ast::IndexType::GIN => Some(IndexMethod::Gin),
+        ast::IndexType::GiST => Some(IndexMethod::Gist),
+        ast::IndexType::SPGiST => Some(IndexMethod::SpGist),
+        ast::IndexType::BRIN => Some(IndexMethod::Brin),
+        _ => None,
+    });
 
     let where_clause = ci.predicate.as_ref().map(convert_sql_expr);
 
@@ -254,25 +305,49 @@ fn parse_create_index(ci: &CreateIndex, _warnings: &mut [Warning]) -> Option<Ind
     })
 }
 
+enum AlterResult {
+    Constraint(AlterConstraint),
+    Identity(AlterIdentity),
+    None,
+}
+
 fn parse_alter_table_op(
     table: &QualifiedName,
     op: &AlterTableOperation,
     warnings: &mut [Warning],
-) -> Option<AlterConstraint> {
+) -> AlterResult {
     match op {
-        AlterTableOperation::AddConstraint(constraint) => {
-            parse_table_constraint(constraint, warnings).map(|c| AlterConstraint {
-                table: table.clone(),
-                constraint: c,
-            })
+        AlterTableOperation::AddConstraint { constraint, .. } => {
+            match parse_table_constraint(constraint, warnings) {
+                Some(c) => AlterResult::Constraint(AlterConstraint {
+                    table: table.clone(),
+                    constraint: c,
+                }),
+                None => AlterResult::None,
+            }
         }
-        _ => None,
+        AlterTableOperation::AlterColumn {
+            column_name,
+            op: AlterColumnOperation::AddGenerated { .. },
+            ..
+        } => AlterResult::Identity(AlterIdentity {
+            table: table.clone(),
+            column: Ident::new(&column_name.value),
+        }),
+        _ => AlterResult::None,
     }
 }
 
 /// Convert sqlparser ObjectName to our QualifiedName.
 fn convert_object_name(name: &ObjectName) -> QualifiedName {
-    let parts: Vec<&str> = name.0.iter().map(|ident| ident.value.as_str()).collect();
+    let parts: Vec<&str> = name
+        .0
+        .iter()
+        .filter_map(|part| match part {
+            ObjectNamePart::Identifier(ident) => Some(ident.value.as_str()),
+            _ => None,
+        })
+        .collect();
     match parts.len() {
         1 => QualifiedName::new(Ident::new(parts[0])),
         2 => QualifiedName::with_schema(Ident::new(parts[0]), Ident::new(parts[1])),
@@ -291,7 +366,9 @@ fn convert_data_type(dt: &DataType) -> PgType {
         DataType::Integer(_) | DataType::Int(_) | DataType::Int4(_) => PgType::Integer,
         DataType::BigInt(_) | DataType::Int8(_) => PgType::BigInt,
         DataType::Real | DataType::Float4 => PgType::Real,
-        DataType::Double | DataType::DoublePrecision | DataType::Float8 => PgType::DoublePrecision,
+        DataType::Double(_) | DataType::DoublePrecision | DataType::Float8 => {
+            PgType::DoublePrecision
+        }
         DataType::Numeric(info) | DataType::Decimal(info) => {
             let (precision, scale) = extract_numeric_info(info);
             PgType::Numeric { precision, scale }
@@ -311,7 +388,7 @@ fn convert_data_type(dt: &DataType) -> PgType {
         DataType::Timestamp(_, tz) => PgType::Timestamp {
             with_tz: matches!(tz, ast::TimezoneInfo::WithTimeZone),
         },
-        DataType::Interval => PgType::Interval,
+        DataType::Interval { .. } => PgType::Interval,
         DataType::Bytea => PgType::Bytea,
         DataType::Uuid => PgType::Uuid,
         DataType::JSON => PgType::Json,
@@ -329,8 +406,12 @@ fn convert_data_type(dt: &DataType) -> PgType {
             // Use the last part of the name to handle schema-qualified types (e.g., pg_catalog.serial)
             let type_name = name
                 .0
-                .last()
-                .map(|id| id.value.to_lowercase())
+                .iter()
+                .filter_map(|part| match part {
+                    ObjectNamePart::Identifier(ident) => Some(ident.value.to_lowercase()),
+                    _ => None,
+                })
+                .next_back()
                 .unwrap_or_default();
             match type_name.as_str() {
                 "serial" => PgType::Serial,
@@ -366,7 +447,7 @@ fn convert_data_type(dt: &DataType) -> PgType {
 /// Convert sqlparser Expr to our Expr.
 fn convert_sql_expr(expr: &SqlExpr) -> Expr {
     match expr {
-        SqlExpr::Value(val) => convert_value(val),
+        SqlExpr::Value(val) => convert_value_with_span(val),
         SqlExpr::Identifier(ident) => Expr::ColumnRef(ident.value.clone()),
         SqlExpr::CompoundIdentifier(idents) => {
             let name: Vec<&str> = idents.iter().map(|i| i.value.as_str()).collect();
@@ -483,6 +564,10 @@ fn extract_array_elements(expr: &SqlExpr) -> Option<Vec<Expr>> {
         SqlExpr::Array(Array { elem, .. }) => Some(elem.iter().map(convert_sql_expr).collect()),
         _ => None,
     }
+}
+
+fn convert_value_with_span(val: &ValueWithSpan) -> Expr {
+    convert_value(&val.value)
 }
 
 fn convert_value(val: &ast::Value) -> Expr {
@@ -662,5 +747,52 @@ mod tests {
         } else {
             panic!("Expected Check constraint");
         }
+    }
+
+    #[test]
+    fn test_parse_identity_native() {
+        let sql = r#"
+            ALTER TABLE address ALTER COLUMN id ADD GENERATED BY DEFAULT AS IDENTITY (
+                SEQUENCE NAME address_id_seq
+                START WITH 1
+                INCREMENT BY 1
+                NO MINVALUE
+                NO MAXVALUE
+                CACHE 1
+            );
+        "#;
+        let (model, warnings) = parse(sql);
+        assert!(warnings.is_empty(), "warnings: {warnings:?}");
+        assert_eq!(model.identity_columns.len(), 1);
+        assert_eq!(model.identity_columns[0].table.name.normalized, "address");
+        assert_eq!(model.identity_columns[0].column.normalized, "id");
+    }
+
+    #[test]
+    fn test_parse_identity_with_schema() {
+        let sql = r#"
+            ALTER TABLE public.seed ALTER COLUMN id ADD GENERATED BY DEFAULT AS IDENTITY (
+                SEQUENCE NAME public.seed_id_seq
+                START WITH 1
+                INCREMENT BY 1
+                NO MINVALUE
+                NO MAXVALUE
+                CACHE 1
+            );
+        "#;
+        let (model, warnings) = parse(sql);
+        assert!(warnings.is_empty(), "warnings: {warnings:?}");
+        assert_eq!(model.identity_columns.len(), 1);
+        assert_eq!(
+            model.identity_columns[0]
+                .table
+                .schema
+                .as_ref()
+                .unwrap()
+                .normalized,
+            "public"
+        );
+        assert_eq!(model.identity_columns[0].table.name.normalized, "seed");
+        assert_eq!(model.identity_columns[0].column.normalized, "id");
     }
 }

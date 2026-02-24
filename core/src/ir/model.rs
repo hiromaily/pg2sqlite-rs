@@ -12,6 +12,7 @@ pub struct SchemaModel {
     pub enums: Vec<EnumDef>,
     pub domains: Vec<DomainDef>,
     pub alter_constraints: Vec<AlterConstraint>,
+    pub identity_columns: Vec<AlterIdentity>,
 }
 
 /// A parsed CREATE TABLE statement.
@@ -32,6 +33,7 @@ pub struct Column {
     pub default: Option<Expr>,
     pub is_primary_key: bool,
     pub is_unique: bool,
+    pub autoincrement: bool,
     pub references: Option<ForeignKeyRef>,
     pub check: Option<Expr>,
 }
@@ -67,6 +69,13 @@ pub enum TableConstraint {
 pub struct AlterConstraint {
     pub table: QualifiedName,
     pub constraint: TableConstraint,
+}
+
+/// An ALTER TABLE ... ALTER COLUMN ... ADD GENERATED AS IDENTITY.
+#[derive(Debug, Clone)]
+pub struct AlterIdentity {
+    pub table: QualifiedName,
+    pub column: Ident,
 }
 
 /// Foreign key reference from a column-level constraint.

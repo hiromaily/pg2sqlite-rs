@@ -63,6 +63,12 @@ pub fn normalize(model: &mut SchemaModel, opts: &NormalizeOptions) {
         Some(s) => s.normalized == target_schema,
         None => true,
     });
+
+    // Filter identity columns by table schema
+    model.identity_columns.retain(|ic| match &ic.table.schema {
+        Some(s) => s.normalized == target_schema,
+        None => true,
+    });
 }
 
 #[cfg(test)]

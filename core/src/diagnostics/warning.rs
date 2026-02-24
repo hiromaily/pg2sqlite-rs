@@ -90,6 +90,8 @@ pub const TYPE_UNKNOWN: &str = "TYPE_UNKNOWN";
 // Serial/identity warnings
 pub const SERIAL_TO_ROWID: &str = "SERIAL_TO_ROWID";
 pub const SERIAL_NOT_PRIMARY_KEY: &str = "SERIAL_NOT_PRIMARY_KEY";
+pub const IDENTITY_TO_AUTOINCREMENT: &str = "IDENTITY_TO_AUTOINCREMENT";
+pub const IDENTITY_NO_PK: &str = "IDENTITY_NO_PK";
 
 // Expression warnings
 pub const NEXTVAL_REMOVED: &str = "NEXTVAL_REMOVED";

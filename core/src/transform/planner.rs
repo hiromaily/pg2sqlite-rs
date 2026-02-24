@@ -5,6 +5,7 @@ use crate::ir::{Expr, PgType, SchemaModel, TableConstraint};
 /// Plan and merge ALTER TABLE constraints into CREATE TABLE, resolve SERIAL/sequences.
 pub fn plan(model: &mut SchemaModel, warnings: &mut Vec<Warning>) {
     merge_alter_constraints(model, warnings);
+    resolve_identity(model, warnings);
     resolve_serials(model, warnings);
     resolve_enums(model, warnings);
 }
@@ -14,7 +15,11 @@ fn merge_alter_constraints(model: &mut SchemaModel, warnings: &mut Vec<Warning>)
     let alters = std::mem::take(&mut model.alter_constraints);
 
     for alter in alters {
-        let target_table = model.tables.iter_mut().find(|t| t.name == alter.table);
+        // Match by table name only (after normalize, all tables are in the same schema)
+        let target_table = model
+            .tables
+            .iter_mut()
+            .find(|t| t.name.name.normalized == alter.table.name.normalized);
 
         match target_table {
             Some(table) => {
@@ -33,6 +38,112 @@ fn merge_alter_constraints(model: &mut SchemaModel, warnings: &mut Vec<Warning>)
                     .with_object(&alter.table.name.normalized),
                 );
             }
+        }
+    }
+}
+
+/// Resolve identity columns: if a column has both IDENTITY and single-column PK,
+/// convert to INTEGER PRIMARY KEY AUTOINCREMENT.
+fn resolve_identity(model: &mut SchemaModel, warnings: &mut Vec<Warning>) {
+    let identities = std::mem::take(&mut model.identity_columns);
+
+    for identity in identities {
+        // Match by table name only (after normalize, all tables are in the same schema)
+        let target_table = model
+            .tables
+            .iter_mut()
+            .find(|t| t.name.name.normalized == identity.table.name.normalized);
+
+        let Some(table) = target_table else {
+            warnings.push(
+                Warning::new(
+                    warning::ALTER_TARGET_MISSING,
+                    Severity::Unsupported,
+                    format!(
+                        "ALTER TABLE target '{}' not found; identity skipped",
+                        identity.table.name.normalized
+                    ),
+                )
+                .with_object(&identity.table.name.normalized),
+            );
+            continue;
+        };
+
+        let table_name = table.name.name.normalized.clone();
+
+        // Find the table-level PK columns
+        let pk_info: Option<(usize, Vec<String>)> =
+            table.constraints.iter().enumerate().find_map(|(i, c)| {
+                if let TableConstraint::PrimaryKey { columns, .. } = c {
+                    Some((i, columns.iter().map(|c| c.normalized.clone()).collect()))
+                } else {
+                    None
+                }
+            });
+
+        // Find the column
+        let col = table
+            .columns
+            .iter_mut()
+            .find(|c| c.name.normalized == identity.column.normalized);
+
+        let Some(col) = col else {
+            warnings.push(
+                Warning::new(
+                    warning::ALTER_TARGET_MISSING,
+                    Severity::Unsupported,
+                    format!(
+                        "identity column '{}.{}' not found; skipped",
+                        table_name, identity.column.normalized
+                    ),
+                )
+                .with_object(format!("{}.{}", table_name, identity.column.normalized)),
+            );
+            continue;
+        };
+
+        let obj = format!("{}.{}", table_name, col.name.normalized);
+
+        // Check if this column is the sole PK
+        let is_sole_pk = col.is_primary_key
+            || pk_info
+                .as_ref()
+                .is_some_and(|(_, cols)| cols.len() == 1 && cols[0] == col.name.normalized);
+
+        let is_integer = matches!(
+            col.pg_type,
+            PgType::Integer | PgType::BigInt | PgType::SmallInt
+        );
+
+        if is_sole_pk && is_integer {
+            col.pg_type = PgType::Integer;
+            col.is_primary_key = true;
+            col.autoincrement = true;
+            col.not_null = false; // implicit in SQLite INTEGER PRIMARY KEY
+            col.default = None;
+
+            // Remove the table-level PK constraint if it was there
+            if let Some((pk_idx, _)) = pk_info {
+                table.constraints.remove(pk_idx);
+            }
+
+            warnings.push(
+                Warning::new(
+                    warning::IDENTITY_TO_AUTOINCREMENT,
+                    Severity::Lossy,
+                    "IDENTITY + PRIMARY KEY mapped to INTEGER PRIMARY KEY AUTOINCREMENT",
+                )
+                .with_object(&obj),
+            );
+        } else if !is_sole_pk {
+            warnings.push(
+                Warning::new(
+                    warning::IDENTITY_NO_PK,
+                    Severity::Unsupported,
+                    "IDENTITY column has no single-column primary key; identity ignored",
+                )
+                .with_object(&obj),
+            );
         }
     }
 }
@@ -171,6 +282,7 @@ mod tests {
             default: None,
             is_primary_key: false,
             is_unique: false,
+            autoincrement: false,
             references: None,
             check: None,
         }
@@ -250,5 +362,68 @@ mod tests {
         plan(&mut model, &mut w);
         assert_eq!(model.tables[0].columns[0].pg_type, PgType::Integer);
         assert!(w.iter().any(|w| w.code == warning::SERIAL_NOT_PRIMARY_KEY));
+    }
+
+    #[test]
+    fn test_identity_with_pk_autoincrement() {
+        use crate::ir::AlterIdentity;
+
+        let mut col = make_column("id", PgType::BigInt);
+        col.not_null = true;
+        let mut model = SchemaModel {
+            tables: vec![make_table(
+                "seed",
+                vec![col, make_column("name", PgType::Text)],
+                vec![],
+            )],
+            alter_constraints: vec![AlterConstraint {
+                table: QualifiedName::new(Ident::new("seed")),
+                constraint: TableConstraint::PrimaryKey {
+                    name: Some(Ident::new("seed_pkey")),
+                    columns: vec![Ident::new("id")],
+                },
+            }],
+            identity_columns: vec![AlterIdentity {
+                table: QualifiedName::new(Ident::new("seed")),
+                column: Ident::new("id"),
+            }],
+            ..Default::default()
+        };
+        let mut w = Vec::new();
+        plan(&mut model, &mut w);
+
+        let col = &model.tables[0].columns[0];
+        assert!(col.autoincrement);
+        assert!(col.is_primary_key);
+        assert!(!col.not_null); // implicit in SQLite PK
+        assert_eq!(col.pg_type, PgType::Integer);
+        assert!(model.tables[0].constraints.is_empty()); // PK removed from table-level
+        assert!(
+            w.iter()
+                .any(|w| w.code == warning::IDENTITY_TO_AUTOINCREMENT)
+        );
+    }
+
+    #[test]
+    fn test_identity_without_pk() {
+        use crate::ir::AlterIdentity;
+
+        let mut col = make_column("id", PgType::BigInt);
+        col.not_null = true;
+        let mut model = SchemaModel {
+            tables: vec![make_table("t", vec![col], vec![])],
+            identity_columns: vec![AlterIdentity {
+                table: QualifiedName::new(Ident::new("t")),
+                column: Ident::new("id"),
+            }],
+            ..Default::default()
+        };
+        let mut w = Vec::new();
+        plan(&mut model, &mut w);
+
+        let col = &model.tables[0].columns[0];
+        assert!(!col.autoincrement);
+        assert!(!col.is_primary_key);
+        assert!(w.iter().any(|w| w.code == warning::IDENTITY_NO_PK));
     }
 }

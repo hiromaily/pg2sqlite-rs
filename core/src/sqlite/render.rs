@@ -82,9 +82,13 @@ fn render_column(col: &Column) -> String {
         parts.push(sqlite_type.to_string());
     }
 
-    // PRIMARY KEY
+    // PRIMARY KEY (with optional AUTOINCREMENT)
     if col.is_primary_key {
-        parts.push("PRIMARY KEY".to_string());
+        if col.autoincrement {
+            parts.push("PRIMARY KEY AUTOINCREMENT".to_string());
+        } else {
+            parts.push("PRIMARY KEY".to_string());
+        }
     }
 
     // NOT NULL
@@ -220,6 +224,7 @@ mod tests {
             default: None,
             is_primary_key: false,
             is_unique: false,
+            autoincrement: false,
             references: None,
             check: None,
         }

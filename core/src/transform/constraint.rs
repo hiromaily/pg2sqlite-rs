@@ -112,6 +112,11 @@ fn handle_integer_pk(table: &mut Table) {
             .iter_mut()
             .find(|c| c.name.normalized == pk_col_name);
         if let Some(col) = col {
+            // Skip if already resolved as autoincrement by identity resolution
+            if col.autoincrement {
+                return;
+            }
+
             let is_integer = matches!(col.sqlite_type, Some(SqliteType::Integer))
                 || matches!(
                     col.pg_type,
@@ -145,6 +150,7 @@ mod tests {
             default: None,
             is_primary_key: false,
             is_unique: false,
+            autoincrement: false,
             references: None,
             check: None,
         }
