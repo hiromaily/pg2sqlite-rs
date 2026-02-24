@@ -6,7 +6,7 @@ update-rustup:
 # Publish to crates.io
 # 1. Bump version in Cargo.toml (workspace.package.version)
 # 2. Update pg2sqlite-core version in cli/Cargo.toml to match
-# 3. Commit the version bump and tag (e.g., git tag v0.1.3)
+# 3. Commit the version bump and tag (e.g., git tag v0.1.4)
 # 4. Push commit and tag (git push && git push --tags)
 # 5. Run `make publish-dry-run` to verify
 # 6. Run `make publish` to upload
