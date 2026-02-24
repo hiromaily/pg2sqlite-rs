@@ -15,11 +15,10 @@ fn merge_alter_constraints(model: &mut SchemaModel, warnings: &mut Vec<Warning>)
     let alters = std::mem::take(&mut model.alter_constraints);
 
     for alter in alters {
-        // Match by table name only (after normalize, all tables are in the same schema)
         let target_table = model
             .tables
             .iter_mut()
-            .find(|t| t.name.name.normalized == alter.table.name.normalized);
+            .find(|t| t.name.name_eq(&alter.table));
 
         match target_table {
             Some(table) => {
@@ -48,11 +47,10 @@ fn resolve_identity(model: &mut SchemaModel, warnings: &mut Vec<Warning>) {
     let identities = std::mem::take(&mut model.identity_columns);
 
     for identity in identities {
-        // Match by table name only (after normalize, all tables are in the same schema)
         let target_table = model
             .tables
             .iter_mut()
-            .find(|t| t.name.name.normalized == identity.table.name.normalized);
+            .find(|t| t.name.name_eq(&identity.table));
 
         let Some(table) = target_table else {
             warnings.push(
@@ -119,7 +117,7 @@ fn resolve_identity(model: &mut SchemaModel, warnings: &mut Vec<Warning>) {
             col.pg_type = PgType::Integer;
             col.is_primary_key = true;
             col.autoincrement = true;
-            col.not_null = false; // implicit in SQLite INTEGER PRIMARY KEY
+            // preserve original NOT NULL (implicit in SQLite INTEGER PRIMARY KEY)
             col.default = None;
 
             // Remove the table-level PK constraint if it was there
@@ -395,7 +393,7 @@ mod tests {
         let col = &model.tables[0].columns[0];
         assert!(col.autoincrement);
         assert!(col.is_primary_key);
-        assert!(!col.not_null); // implicit in SQLite PK
+        assert!(col.not_null); // preserved from original PG DDL
         assert_eq!(col.pg_type, PgType::Integer);
         assert!(model.tables[0].constraints.is_empty()); // PK removed from table-level
         assert!(

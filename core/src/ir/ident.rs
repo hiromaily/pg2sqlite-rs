@@ -250,6 +250,14 @@ impl QualifiedName {
     pub fn to_sql(&self) -> String {
         self.name.to_sql()
     }
+
+    /// Compare by name only, treating `None` schema as matching any schema.
+    /// Use this when matching ALTER TABLE targets against CREATE TABLE names,
+    /// since normalize may leave schemas inconsistent (e.g., unqualified CREATE
+    /// vs schema-qualified ALTER).
+    pub fn name_eq(&self, other: &QualifiedName) -> bool {
+        self.name == other.name
+    }
 }
 
 impl std::fmt::Display for QualifiedName {

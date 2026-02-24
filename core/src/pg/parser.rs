@@ -23,13 +23,17 @@ use crate::ir::{
 /// Since we only need to know the column has identity (not the sequence details),
 /// we strip the entire parenthesized block.
 fn strip_identity_options(input: &str) -> String {
-    let upper = input.to_uppercase();
     let mut result = String::with_capacity(input.len());
     let mut pos = 0;
+    let bytes = input.as_bytes();
+    let needle = b"AS IDENTITY";
 
-    while pos < input.len() {
-        if let Some(idx) = upper[pos..].find("AS IDENTITY") {
-            let identity_end = pos + idx + "AS IDENTITY".len();
+    while pos < bytes.len() {
+        if let Some(idx) = bytes[pos..]
+            .windows(needle.len())
+            .position(|w| w.eq_ignore_ascii_case(needle))
+        {
+            let identity_end = pos + idx + needle.len();
             result.push_str(&input[pos..identity_end]);
             pos = identity_end;
 
